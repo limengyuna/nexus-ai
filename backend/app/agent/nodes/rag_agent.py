@@ -17,7 +17,7 @@ from typing import Any, Dict
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agent.llm import get_llm
+from app.agent.llm import get_llm_fast
 from app.agent.state import AgentState, RetrievedDoc, append_trace
 from app.core.database import SessionLocal
 from app.models.knowledge_base import KnowledgeBase
@@ -119,7 +119,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 
     embedder = get_embedder()
     vector_store = get_vector_store()
-    llm = get_llm()
+    llm = get_llm_fast()
 
     # 查询改写：结合对话历史把模糊查询改写为具体查询
     search_query = _rewrite_query(llm, user_input, history_text)

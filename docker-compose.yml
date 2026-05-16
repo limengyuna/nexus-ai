@@ -82,6 +82,7 @@ services:
       # LLM / Embedding 凭证（必须在 .env 中提供）
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?需要在 .env 中设置 DEEPSEEK_API_KEY}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+      DEEPSEEK_MODEL_FAST: ${DEEPSEEK_MODEL_FAST:-deepseek-v4-flash}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi
@@ -127,6 +128,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-me-in-prod}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?需要在 .env 中设置 DEEPSEEK_API_KEY}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+      DEEPSEEK_MODEL_FAST: ${DEEPSEEK_MODEL_FAST:-deepseek-v4-flash}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi

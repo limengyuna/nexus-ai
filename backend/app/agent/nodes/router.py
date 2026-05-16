@@ -17,7 +17,7 @@ from typing import Any, Dict
 
 from loguru import logger
 
-from app.agent.llm import get_llm
+from app.agent.llm import get_llm_fast
 from app.agent.skills import skill_registry
 from app.agent.state import AgentState, append_trace
 
@@ -123,7 +123,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         *state.get("context_messages", []),  # 包含对话历史 + 当前用户输入
     ]
 
-    llm = get_llm()
+    llm = get_llm_fast()
     try:
         raw = llm.complete(
             messages=router_messages,

@@ -175,6 +175,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         finish_reason = resp["finish_reason"]
         content = resp["content"]
         tool_calls = resp["tool_calls"]
+        reasoning_content = resp.get("reasoning_content")  # DeepSeek thinking mode
 
         # LLM 决定直接回答（不调工具）
         if not tool_calls or finish_reason == "stop":
@@ -182,7 +183,8 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             break
 
         # 把 assistant 的 tool_calls 消息追加到 messages
-        messages.append({
+        # DeepSeek thinking mode 要求多轮对话必须传回 reasoning_content
+        assistant_msg: Dict[str, Any] = {
             "role": "assistant",
             "content": content,
             "tool_calls": [
@@ -193,7 +195,10 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 }
                 for tc in tool_calls
             ],
-        })
+        }
+        if reasoning_content:
+            assistant_msg["reasoning_content"] = reasoning_content
+        messages.append(assistant_msg)
 
         # 依次执行每个工具调用
         for tc in tool_calls:

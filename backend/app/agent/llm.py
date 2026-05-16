@@ -139,26 +139,40 @@ class LLMClient:
             for tc in tool_calls_raw
         ]
 
+        # DeepSeek thinking mode 会返回 reasoning_content，多轮对话必须传回
+        reasoning_content = getattr(choice.message, "reasoning_content", None)
+
         return {
             "content": choice.message.content or "",
             "tool_calls": tool_calls,
             "finish_reason": choice.finish_reason,
+            "reasoning_content": reasoning_content,
         }
 
 
 # ---------- 单例工厂 ----------
 _singleton_llm: Optional[LLMClient] = None
+_singleton_llm_fast: Optional[LLMClient] = None
 
 
 def get_llm() -> LLMClient:
-    """获取 LLM 单例"""
+    """获取重型 LLM 单例（Pro 模型，用于 Tool Agent、Skills 等复杂推理）"""
     global _singleton_llm
     if _singleton_llm is None:
         _singleton_llm = LLMClient()
     return _singleton_llm
 
 
+def get_llm_fast() -> LLMClient:
+    """获取轻型 LLM 单例（Flash 模型，用于 Router、闲聊、RAG 等简单任务）"""
+    global _singleton_llm_fast
+    if _singleton_llm_fast is None:
+        _singleton_llm_fast = LLMClient(model=settings.DEEPSEEK_MODEL_FAST)
+    return _singleton_llm_fast
+
+
 def reset_llm() -> None:
-    """重置单例（测试用）"""
-    global _singleton_llm
+    """重置所有 LLM 单例（测试用）"""
+    global _singleton_llm, _singleton_llm_fast
     _singleton_llm = None
+    _singleton_llm_fast = None

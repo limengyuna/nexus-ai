@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     # ---------- DeepSeek API（后续阶段使用） ----------
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_API_BASE: str = "https://api.deepseek.com/v1"
-    DEEPSEEK_MODEL: str = "deepseek-v4-pro"
+    DEEPSEEK_MODEL: str = "deepseek-v4-pro"          # 重型模型：Tool Agent、Skills 等复杂推理
+    DEEPSEEK_MODEL_FAST: str = "deepseek-v4-flash"   # 轻型模型：Router、闲聊、RAG 等简单任务
 
     # ---------- 阿里通义 Embedding API（后续阶段使用） ----------
     DASHSCOPE_API_KEY: str = ""

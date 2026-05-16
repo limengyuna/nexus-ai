@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 from loguru import logger
 
-from app.agent.llm import get_llm
+from app.agent.llm import get_llm_fast
 from app.agent.state import AgentState, append_trace
 
 _CHITCHAT_SYSTEM_PROMPT = """你是 NexusAI 智能助手。
@@ -36,7 +36,7 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
         *state.get("context_messages", []),
     ]
 
-    llm = get_llm()
+    llm = get_llm_fast()
     try:
         answer = llm.complete(messages=messages, temperature=0.6, max_tokens=400)
     except Exception as e:
