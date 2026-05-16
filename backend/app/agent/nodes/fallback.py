@@ -24,11 +24,21 @@ _CHITCHAT_SYSTEM_PROMPT = """你是 NexusAI 智能助手。
 回答风格：简洁、友好、中文。"""
 
 
+def _push_meta(token_queue, state: AgentState) -> None:
+    """向流式队列推送 Router 决策（meta 事件）"""
+    token_queue.put(("meta", {
+        "intent": state.get("intent", ""),
+        "route_reason": state.get("route_reason", ""),
+        "skill_used": state.get("skill_used"),
+    }))
+
+
 def fallback_node(state: AgentState) -> Dict[str, Any]:
     """闲聊 / 兜底节点"""
     started_at = time.time()
     user_input = state.get("user_input", "")
     prev_error = state.get("error")
+    token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
 
     # 上下文由 context_prep 统一注入到 state.context_messages
     messages = [
@@ -36,16 +46,38 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
         *state.get("context_messages", []),
     ]
 
+    # 流式模式：先推送 Router 决策，让前端立即展示
+    if token_queue:
+        _push_meta(token_queue, state)
+
     llm = get_llm_fast()
     try:
-        answer = llm.complete(messages=messages, temperature=0.6, max_tokens=400)
+        if token_queue:
+            # ---------- 真流式：逐 token 推送给前端 ----------
+            chunks: list[str] = []
+            # 前置错误信息先推送
+            if prev_error:
+                prefix = f"（前置处理出错：{prev_error}）\n\n"
+                chunks.append(prefix)
+                token_queue.put(("chunk", prefix))
+            for tok in llm.complete_stream(messages=messages, temperature=0.6, max_tokens=800):
+                chunks.append(tok)
+                token_queue.put(("chunk", tok))
+            answer = "".join(chunks)
+        else:
+            # ---------- 非流式兼容（chat_once 调用） ----------
+            answer = llm.complete(messages=messages, temperature=0.6, max_tokens=400)
+            if prev_error:
+                answer = f"（前置处理出错：{prev_error}）\n\n{answer}"
     except Exception as e:
-        logger.exception("[Fallback] 连 LLM 也失败了: {}", e)
+        logger.exception("[Fallback] LLM 失败: {}", e)
         answer = "抱歉，我暂时无法处理这个请求，请稍后再试。"
-
-    # 如果是因为前置节点报错而进 fallback，把错误信息带出
-    if prev_error:
-        answer = f"（前置处理出错：{prev_error}）\n\n{answer}"
+        if token_queue:
+            token_queue.put(("chunk", answer))
+    finally:
+        # 流式结束信号
+        if token_queue:
+            token_queue.put(("done", None))
 
     return {
         "final_answer": answer,

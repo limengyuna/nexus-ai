@@ -14,6 +14,7 @@
 | [3](#3-tool-agent-function-calling-上下文缺失) | Tool Agent Function Calling 上下文缺失 | Tool Agent | ✅ 已修复（被问题 1 覆盖） | 2026-05-15 |
 | [4](#4-skill-关键词误挡-mcp-请求统一-function-calling-架构) | Skill 关键词误挡 MCP 请求：统一 Function Calling 架构 | Tool Agent + Skill | ✅ 已修复 | 2026-05-16 |
 | [5](#5-双模型路由pro--flash成本与速度优化) | 双模型路由（Pro + Flash）：成本与速度优化 | LLM 层 + 全节点 | ✅ 已实现 | 2026-05-17 |
+| [6](#6-假流式改真流式sse-token-级推送优化) | 假流式改真流式：SSE Token 级推送优化 | chat_service + 终端节点 | ✅ 已实现 | 2026-05-17 |
 
 ---
 
@@ -421,3 +422,105 @@ START → context_prep → Router (Flash, 快速分类)
 | Anthropic | Haiku 做分类/过滤，Sonnet/Opus 做推理 |
 | Cursor / Windsurf | 编辑用大模型，Tab 补全用小模型 |
 | Dify | 支持每个节点配置不同模型 |
+
+---
+
+## 6. 假流式改真流式：SSE Token 级推送优化
+
+> **日期**：2026-05-17
+> **涉及文件**：`backend/app/services/chat_service.py`、`backend/app/agent/nodes/fallback.py`、`backend/app/agent/nodes/rag_agent.py`、`backend/app/agent/nodes/tool_agent.py`
+
+### 现象
+
+前端已使用 SSE 流式接口，但用户发送“你好”后仍需等 **4 秒+** 才看到第一个字。查看代码发现是“假流式”——后端 `graph.invoke()` 同步跑完整个 LangGraph，拿到完整回答后才按 4 字符一组 yield，只有“打字机动画”而无真正的延迟改善。
+
+```
+假流式时序：
+  t=0s     用户发送
+  t=0~1.2s Router 执行中…
+  t=1.2~4s Fallback LLM 生成中…
+  t=4s     拿到完整回答，开始分块 yield
+  t=4.1s   用户看到第一个字    ← 感知延迟 4s+
+```
+
+### 根因分析
+
+`chat_service.chat_stream()` 中的关键行：
+
+```python
+# 这一行会阻塞到整个图执行完毕
+final_state = await asyncio.to_thread(graph.invoke, initial_state)
+# 然后才开始 yield chunks…
+```
+
+`graph.invoke()` 同步跑完所有节点后才返回，无法在执行过程中向前端推送任何事件。
+
+### 修复方案：线程安全队列 + 节点内流式生成
+
+核心思想：将 `queue.Queue` 注入 AgentState，终端节点在 LLM 生成时通过队列实时推送 token，`chat_stream` 并行消费队列并 yield SSE 事件。
+
+#### 1. 队列协议
+
+```python
+# 队列中传输的元组 (event_type, data)
+("meta",  {intent, route_reason, skill_used})  # Router 决策
+("chunk", "你好！")                              # token 片段
+("done",  None)                                  # 流式结束信号
+```
+
+#### 2. `chat_service.py`：后台线程 + 并行消费
+
+```python
+# 注入队列到 state
+token_queue = queue.Queue()
+initial_state["_token_queue"] = token_queue
+
+# LangGraph 在后台线程执行
+graph_task = asyncio.ensure_future(asyncio.to_thread(graph.invoke, initial_state))
+
+# 并行消费队列，实时 yield SSE 事件
+while not stream_done:
+    event_type, data = token_queue.get_nowait()
+    yield (event_type, data)  # 立即推送到前端
+```
+
+#### 3. 终端节点改造
+
+| 节点 | 改造 | 流式类型 |
+|------|------|----------|
+| **Fallback** | `complete_stream()` 逐 token 推送 | 真流式 |
+| **RAG Agent** | `complete_stream()` 逐 token 推送 | 真流式 |
+| **Tool Agent** | 工具完成后一次性推送最终答案 | 块推送 |
+
+每个终端节点进入时先推 `meta`（Router 决策），退出前推 `done`。非流式调用（`chat_once`）时 state 中无 `_token_queue`，节点自动走原来的同步路径，完全向后兼容。
+
+#### 4. 前端：无需改动
+
+已有的 `onChunk` 回调直接追加到消息内容中，完全兼容。
+
+### 改造后时序
+
+```
+真流式时序：
+  t=0s     用户发送
+  t=0~1.2s Router 执行中…
+  t=1.2s   → meta 事件推送（前端立刻显示 Router 决策）
+  t=1.25s  → 第一个 chunk 推送     ← 感知延迟 ~1.2s
+  t=1.3~3s → 后续 chunks 逐步推送…
+  t=3s     → done 事件
+```
+
+### 效果
+
+- **感知延迟**：从 ~4s 降到 ~1.2s（仅等 Router），提升 **70%**
+- **前端无改动**：已有的 SSE 事件处理完全兼容
+- **非流式兼容**：`chat_once` 调用不注入队列，节点自动走同步路径
+- **异常安全**：所有路径（含 early return）都推 `done`，消费方不会卡死
+
+### 设计参考
+
+| 产品 | 做法 |
+|------|------|
+| ChatGPT / Claude | Router/推理同步，最终回答流式输出 |
+| Dify / Coze | `agent_thought` 状态事件 + `message` 流式 token |
+| LangGraph 官方 | `graph.astream_events()` 订阅节点事件 |

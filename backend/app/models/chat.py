@@ -4,7 +4,7 @@
 import enum
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Boolean
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -121,6 +121,15 @@ class ChatMessage(Base, TimestampMixin):
         Integer,
         nullable=True,
         comment="Token 消耗数",
+    )
+
+    # 摘要压缩后的软删除标记（已压缩的旧消息不会从 DB 删除，仅标记，前端可加载完整历史）
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="是否已被摘要压缩归档",
     )
 
     # ---------- 关联关系 ----------

@@ -70,7 +70,7 @@ const shortTime = computed(() => {
 </script>
 
 <template>
-  <div class="group flex" :class="isUser ? 'justify-end' : 'justify-start'">
+  <div v-if="isUser || message.content" class="group flex" :class="isUser ? 'justify-end' : 'justify-start'">
     <div class="max-w-3xl flex flex-col" :class="isUser ? 'items-end' : 'items-start'">
       <!-- 来源标签 -->
       <div v-if="sourceLabel" class="text-xs text-gray-400 dark:text-gray-500 mb-1 px-1">

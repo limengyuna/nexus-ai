@@ -120,7 +120,16 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     """LLM Function Calling 主循环（最多 3 轮，避免死循环）"""
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
+    token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
     llm = get_llm()
+
+    # 流式模式：先推送 Router 决策，让前端立即展示
+    if token_queue:
+        token_queue.put(("meta", {
+            "intent": state.get("intent", ""),
+            "route_reason": state.get("route_reason", ""),
+            "skill_used": state.get("skill_used"),
+        }))
 
     # 统一工具池：内部 Tool + MCP 外部工具 + Skill
     internal_tools = tool_registry.to_openai_tools()
@@ -142,6 +151,10 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             ],
             temperature=0.3,
         )
+        # 流式模式：推送答案 + 结束信号
+        if token_queue:
+            token_queue.put(("chunk", answer))
+            token_queue.put(("done", None))
         return {
             "final_answer": answer,
             "tool_calls": [],
@@ -286,6 +299,13 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         })
         final_answer = llm.complete(messages=messages, temperature=0.3)
 
+    # 流式模式：推送最终答案 + 结束信号
+    def _push_answer_and_done():
+        if token_queue and final_answer:
+            token_queue.put(("chunk", final_answer))
+        if token_queue:
+            token_queue.put(("done", None))
+
     # 清理 DeepSeek DSML 标记（兆底：防止 LLM 输出原始工具调用 XML）
     if final_answer and "DSML" in final_answer:
         import re
@@ -299,6 +319,8 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             final_answer = llm.complete(messages=messages, temperature=0.3)
         else:
             final_answer = cleaned
+
+    _push_answer_and_done()
 
     return {
         "skill_used": skill_used,

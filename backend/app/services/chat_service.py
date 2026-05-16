@@ -75,9 +75,20 @@ class ChatService:
 
     @staticmethod
     def list_messages(db: Session, session_id: int) -> List[ChatMessage]:
+        """返回会话所有消息（含已归档），供前端展示完整历史"""
         return (
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.id)
+            .all()
+        )
+
+    @staticmethod
+    def list_active_messages(db: Session, session_id: int) -> List[ChatMessage]:
+        """返回会话中未归档的消息（供摘要压缩判断和 Agent 上下文构建使用）"""
+        return (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id, ChatMessage.is_archived == False)  # noqa: E712
             .order_by(ChatMessage.id)
             .all()
         )
@@ -108,12 +119,12 @@ class ChatService:
     @staticmethod
     def _compress_if_needed(db: Session, session: ChatSession) -> None:
         """
-        若会话消息超过阈值，触发摘要压缩：
+        若会话活跃消息超过阈值，触发摘要压缩：
         1. 取出所有除最近 N 条外的旧消息
         2. 调 LLM 生成新摘要（结合上一版摘要）
-        3. 删除旧消息行，把新摘要写回 session.summary
+        3. 标记旧消息为已归档（is_archived=True），把新摘要写回 session.summary
         """
-        messages = ChatService.list_messages(db, session.id)
+        messages = ChatService.list_active_messages(db, session.id)
         if len(messages) <= SUMMARY_TRIGGER_MESSAGES:
             return
 
@@ -141,12 +152,12 @@ class ChatService:
             return
 
         session.summary = new_summary.strip()
-        # 删除已压缩的旧消息
+        # 软删除：标记为已归档，保留完整历史供前端浏览
         for m in to_compress:
-            db.delete(m)
+            m.is_archived = True
         db.commit()
         logger.info(
-            "[Memory] 会话 {} 摘要压缩：清理 {} 条旧消息，新摘要长度 {}",
+            "[Memory] 会话 {} 摘要压缩：归档 {} 条旧消息，新摘要长度 {}",
             session.id, len(to_compress), len(new_summary),
         )
 
@@ -260,14 +271,17 @@ class ChatService:
         事件序列：
         1. status   - {step: "user_saved"}             用户消息已保存
         2. status   - {step: "thinking"}                Agent 开始思考
-        3. meta     - {intent, route_reason, skill_used} Router 决策结果（图执行完才有）
-        4. chunk    - {text: "..."}                     回答的一段字符（多次）
+        3. meta     - {intent, route_reason, skill_used} Router 决策（由终端节点推送）
+        4. chunk    - {text: "..."}                     真流式 token（多次）
         5. done     - {message_id, tool_calls, execution_trace, retrieved_docs, token_usage}
 
-        注意：当前是"准流式"——图执行同步完成后再按字符 yield。
-        要真正的 LLM token-by-token 流式需要重构 LLM 客户端（待后续优化）。
+        实现方式：graph.invoke 在后台线程运行，终端节点（fallback/rag/tool）通过
+        _token_queue 实时推送 meta/chunk/done 事件，本方法并行消费队列并 yield。
+        Fallback 和 RAG 使用 LLM complete_stream 逐 token 推送（真流式）。
+        Tool Agent 在工具调用完成后一次性推送最终答案。
         """
         import asyncio
+        import queue as queue_mod
         from app.agent.graph import get_agent_graph
         from app.agent.state import make_initial_state
 
@@ -287,11 +301,9 @@ class ChatService:
         db.refresh(session)
         yield ("status", {"step": "thinking"})
 
-        # ---------- 3. 跑 LangGraph（同步阻塞，未来可改成 astream）----------
-        # 拼接上下文：summary + 最近对话记录（同 chat_once）
+        # ---------- 3. 构造 AgentState + 注入流式队列 ----------
         effective_summary = session.summary or ""
         recent_msgs = ChatService.list_messages(db, session.id)
-        # 排除刚保存的当前用户消息（最后一条），取之前的最近几条
         history_msgs = recent_msgs[:-1] if recent_msgs else []
         if history_msgs:
             recent_text = "\n".join(
@@ -301,9 +313,10 @@ class ChatService:
                 effective_summary += f"\n\n最近对话记录：\n{recent_text}"
             else:
                 effective_summary = f"最近对话记录：\n{recent_text}"
-        # Prompt Injection 轻量防护（同 chat_once）
         if maybe_warn(user_input, session.user_id):
             effective_summary += GUARD_REINFORCEMENT
+
+        token_queue: queue_mod.Queue = queue_mod.Queue()
         initial_state = make_initial_state(
             user_input=user_input,
             session_id=session.id,
@@ -311,30 +324,57 @@ class ChatService:
             kb_id=session.kb_id,
             summary=effective_summary,
         )
+        initial_state["_token_queue"] = token_queue  # 注入流式队列
+
         graph = get_agent_graph()
-        # 让 LangGraph 跑在线程池里，避免 block 异步事件循环
-        final_state = await asyncio.to_thread(graph.invoke, initial_state)
 
-        intent = final_state.get("intent", "")
-        # 先发 meta，前端可以立刻展示 Router 决策
-        yield (
-            "meta",
-            {
-                "intent": intent,
-                "route_reason": final_state.get("route_reason", ""),
-                "skill_used": final_state.get("skill_used"),
-            },
-        )
+        # ---------- 4. 后台线程执行 LangGraph，同时消费队列 ----------
+        graph_task = asyncio.ensure_future(asyncio.to_thread(graph.invoke, initial_state))
 
-        # ---------- 4. 按字符流式发送回答 ----------
+        stream_done = False
+        while not stream_done:
+            # 批量取出队列中所有可用事件
+            has_event = False
+            while True:
+                try:
+                    event_type, data = token_queue.get_nowait()
+                    has_event = True
+                except queue_mod.Empty:
+                    break
+                if event_type == "meta":
+                    yield ("meta", data)
+                elif event_type == "chunk":
+                    yield ("chunk", {"text": data})
+                elif event_type == "done":
+                    stream_done = True
+                    break
+
+            if stream_done:
+                break
+
+            # 检查图是否已异常退出（未发 done 信号）
+            if graph_task.done():
+                exc = graph_task.exception()
+                if exc:
+                    logger.error("[ChatService] Agent graph 异常退出: {}", exc)
+                    yield ("chunk", {"text": f"\n\n[Agent 执行出错: {exc}]"})
+                break
+
+            # 没有事件时短暂让出事件循环
+            if not has_event:
+                await asyncio.sleep(0.02)
+
+        # ---------- 5. 等待图执行完成，获取完整 state ----------
+        try:
+            final_state = await graph_task
+        except Exception as e:
+            logger.exception("[ChatService] Agent graph 执行失败: {}", e)
+            final_state = initial_state  # 降级
+
+        # ---------- 6. 保存 assistant 消息 ----------
         answer = final_state.get("final_answer", "") or "（无输出）"
-        chunk_size = 4  # 每 4 字符一组（平衡感知速度和事件数量）
-        for i in range(0, len(answer), chunk_size):
-            yield ("chunk", {"text": answer[i : i + chunk_size]})
-            # 极轻的延迟让"打字机"效果可感知（中文：每字 ~5ms）
-            await asyncio.sleep(0.015)
+        intent = final_state.get("intent", "")
 
-        # ---------- 5. 保存 assistant 消息 ----------
         if intent == "rag":
             src = AgentSource.RAG
         elif intent == "tool":
@@ -368,8 +408,7 @@ class ChatService:
         db.commit()
         db.refresh(assistant_msg)
 
-        # ---------- 6. 发送 done + 完整元数据 ----------
-        # tool_calls / execution_trace 已确保是可 JSON 序列化的
+        # ---------- 7. 发送 done + 完整元数据 ----------
         execution_trace = json.loads(
             json.dumps(final_state.get("execution_trace", []), default=str)
         )

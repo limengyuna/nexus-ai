@@ -78,6 +78,9 @@ class AgentState(TypedDict, total=False):
     total_tokens: int                          # 本轮 Token 总消耗
     error: Optional[str]                       # 全局错误（fallback 节点设置）
 
+    # ---------- 流式推送（仅 SSE 模式注入） ----------
+    _token_queue: Any                          # queue.Queue，终端节点通过它实时推送 token 给前端
+
 
 # ---------- 工具函数 ----------
 def make_initial_state(
