@@ -29,17 +29,62 @@ ROUTE_CHITCHAT = "chitchat"
 
 _ROUTER_SYSTEM_PROMPT = """你是 NexusAI 平台的意图路由器。把用户输入分类到下列之一：
 
-1. "rag"      - 用户在问知识库里的文档相关问题（如：项目架构、文档内容、上传过的资料）
-2. "tool"     - 用户需要调用工具或技能（如：查天气、算数学、查实时数据、旅行规划）
+1. "rag"      - 用户在问已上传到知识库里的文档/资料内容
+2. "tool"     - 用户需要借助工具或外部服务来完成任务（搜索、计算、访问代码仓库、调用 API 等）
 3. "chitchat" - 闲聊、问候、一般常识问答
 
-可用技能（如果意图属于这些技能范畴，请选 "tool"）：
-{skills}
+当前可用能力（命中则选 "tool"）：
+{capabilities}
 
 输出严格的 JSON 格式：
 {{"intent": "rag|tool|chitchat", "reason": "简短理由（中文）"}}
 
 只输出 JSON，不要其他任何文字。"""
+
+
+def _get_mcp_server_names(user_id: int | None) -> list[str]:
+    """
+    轻量级获取用户已配置的 MCP 服务器名称列表。
+    只查 DB 配置表，不拉取具体工具列表，保持 Router 轻量。
+    """
+    if user_id is None:
+        return []
+    try:
+        from app.core.database import SessionLocal
+        from app.models.mcp_server import MCPServerConfig
+
+        db = SessionLocal()
+        try:
+            configs = (
+                db.query(MCPServerConfig.name)
+                .filter(
+                    MCPServerConfig.created_by == user_id,
+                    MCPServerConfig.is_active.is_(True),
+                )
+                .all()
+            )
+            return [c.name for c in configs]
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("[Router] 加载 MCP 服务器名称失败: {}", e)
+        return []
+
+
+def _build_capabilities_brief(user_id: int | None) -> str:
+    """
+    统一构建“可用能力”描述，合并 Skill + MCP 服务器名称。
+    保持简洁，让 Router LLM 知道“tool 能做什么”即可。
+    """
+    lines = []
+    # Skill（内存读取，零开销）
+    for s in skill_registry.to_choices_for_router():
+        lines.append(f"- [技能] {s['name']}: {s['description']}")
+    # MCP 服务器名称（轻量 DB 查询）
+    mcp_names = _get_mcp_server_names(user_id)
+    for name in mcp_names:
+        lines.append(f"- [外部服务] {name}")
+    return "\n".join(lines) if lines else "(暂无)"
 
 
 def router_node(state: AgentState) -> Dict[str, Any]:
@@ -69,11 +114,8 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         }
 
     # ---------- 阶段 2：LLM 精确分类 ----------
-    skills_brief = "\n".join(
-        f"- {s['name']}: {s['description']}"
-        for s in skill_registry.to_choices_for_router()
-    )
-    system_prompt = _ROUTER_SYSTEM_PROMPT.format(skills=skills_brief or "(暂无可用技能)")
+    capabilities = _build_capabilities_brief(state.get("user_id"))
+    system_prompt = _ROUTER_SYSTEM_PROMPT.format(capabilities=capabilities)
 
     # 构建 LLM 消息：上下文由 context_prep 节点统一注入到 state.messages
     router_messages = [

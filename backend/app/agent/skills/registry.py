@@ -89,6 +89,34 @@ class SkillRegistry:
             for s in self._skills.values()
         ]
 
+    def to_openai_tools(self) -> List[Dict[str, Any]]:
+        """
+        将所有 Skill 转换为 OpenAI Function Calling 格式。
+
+        每个 Skill 作为一个"工具"暴露给 LLM，参数固定为 user_input。
+        LLM 选择调用某个 Skill 后，由 tool_agent 分发执行。
+        """
+        schemas: List[Dict[str, Any]] = []
+        for s in self._skills.values():
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": f"skill_{s.name}",
+                    "description": f"[技能] {s.description}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_input": {
+                                "type": "string",
+                                "description": "用户的原始输入或经过改写的请求",
+                            },
+                        },
+                        "required": ["user_input"],
+                    },
+                },
+            })
+        return schemas
+
 
 # 全局单例
 skill_registry = SkillRegistry()

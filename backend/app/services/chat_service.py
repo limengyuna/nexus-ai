@@ -20,9 +20,10 @@ from app.core.prompt_guard import GUARD_REINFORCEMENT, maybe_warn
 from app.models.chat import AgentSource, ChatMessage, ChatSession, MessageRole
 
 # 压缩阈值：当一次会话中的消息条数超过此值时，触发摘要压缩
-SUMMARY_TRIGGER_MESSAGES = 20
-# 压缩后保留最近 N 条消息原文
-KEEP_RECENT_MESSAGES = 6
+# 参考 LangChain ConversationSummaryBufferMemory，5 轮对话（10 条消息）触发
+SUMMARY_TRIGGER_MESSAGES = 10
+# 压缩后保留最近 N 条消息原文（2 轮完整交互）
+KEEP_RECENT_MESSAGES = 4
 
 _SUMMARY_PROMPT = """你是对话摘要器。请把下面这段历史对话压缩成简短的摘要（不超过 300 字），
 保留关键信息：用户的主要问题、Agent 给出的结论、提到的实体（如城市、人物、文件名等）。

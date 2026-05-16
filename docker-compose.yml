@@ -81,6 +81,7 @@ services:
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
       # LLM / Embedding 凭证（必须在 .env 中提供）
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?需要在 .env 中设置 DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi
@@ -125,6 +126,7 @@ services:
       ENV: production
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-me-in-prod}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?需要在 .env 中设置 DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi

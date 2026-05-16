@@ -1,5 +1,7 @@
 # Tool Agent 上下文缺失问题图解
 
+> **状态**：✅ 已修复（通过 context_prep 统一注入 + 统一 Function Calling 架构）
+
 ## 你遇到的真实场景
 
 ```
@@ -112,6 +114,7 @@ LLM 不是人，它没有"记忆"。每次调用 LLM 时，你传什么 messages
 
 | 节点 | 修复前 | 修复后 |
 |------|--------|--------|
-| **Router** | ❌ 只看当前输入 → 意图误判 | ✅ 已修复：注入历史 |
-| **RAG Agent** | ❌ 只看当前输入 → 检索不准 | ✅ 已修复：查询改写 + 历史注入 |
-| **Tool Agent** | ❌ 只看当前输入 → 不知道上下文 | ⬜ 待修复 |
+| **Router** | ❌ 只看当前输入 → 意图误判 | ✅ 已修复：context_prep 统一注入 |
+| **RAG Agent** | ❌ 只看当前输入 → 检索不准 | ✅ 已修复：查询改写 + context_prep 统一注入 |
+| **Tool Agent** | ❌ 只看当前输入 → 不知道上下文 | ✅ 已修复：context_prep 统一注入 + 统一 Function Calling |
+| **Fallback** | ❌ 只看当前输入 → 闲聊无上下文 | ✅ 已修复：context_prep 统一注入 |

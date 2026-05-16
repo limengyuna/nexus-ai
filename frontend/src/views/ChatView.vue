@@ -30,6 +30,17 @@ const showThinking = ref(false)  // 默认折叠，让消息区获得最大可�
 const errorMsg = ref('')
 const showSummary = ref(false)
 
+// UTC 时间戳转本地时间显示
+function formatLocalTime(utcStr: string | undefined | null): string {
+  if (!utcStr) return ''
+  const d = new Date(utcStr)
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  })
+}
+
 // 会话搜索过滤
 const searchKeyword = ref('')
 const filteredSessions = computed(() => {
@@ -354,9 +365,9 @@ function onKeyDown(e: KeyboardEvent) {
       <transition
         enter-active-class="transition-all duration-200 ease-out"
         enter-from-class="opacity-0 -translate-y-2 max-h-0"
-        enter-to-class="opacity-100 translate-y-0 max-h-40"
+        enter-to-class="opacity-100 translate-y-0 max-h-60"
         leave-active-class="transition-all duration-150 ease-in"
-        leave-from-class="opacity-100 translate-y-0 max-h-40"
+        leave-from-class="opacity-100 translate-y-0 max-h-60"
         leave-to-class="opacity-0 -translate-y-2 max-h-0"
       >
         <div
@@ -368,6 +379,10 @@ function onKeyDown(e: KeyboardEvent) {
             <div class="min-w-0">
               <div class="text-[10px] font-medium text-amber-600/70 dark:text-amber-400/70 uppercase tracking-wider mb-1">AI 对话记忆</div>
               <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{{ chat.activeSession.summary }}</p>
+              <div class="mt-2 flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
+                <span>创建：{{ formatLocalTime(chat.activeSession.created_at) }}</span>
+                <span>更新：{{ formatLocalTime(chat.activeSession.updated_at) }}</span>
+              </div>
             </div>
           </div>
         </div>
