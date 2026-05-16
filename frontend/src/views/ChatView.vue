@@ -5,7 +5,7 @@
  * 三栏布局：会话列表 | 消息区 | 思考过程
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ArrowDown, Check, ChevronLeft, ChevronRight, Library, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Library, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import MessageBubble from '@/components/MessageBubble.vue'
@@ -28,6 +28,7 @@ const newSessionTitle = ref('')
 const newSessionKbId = ref<number | null>(null)
 const showThinking = ref(false)  // 默认折叠，让消息区获得最大可用空间
 const errorMsg = ref('')
+const showSummary = ref(false)
 
 // 会话搜索过滤
 const searchKeyword = ref('')
@@ -140,6 +141,7 @@ async function handleSelect(sessionId: number) {
   if (renamingSessionId.value !== null && renamingSessionId.value !== sessionId) {
     cancelRename()
   }
+  showSummary.value = false
   await chat.selectSession(sessionId)
 }
 
@@ -318,6 +320,21 @@ function onKeyDown(e: KeyboardEvent) {
             <span>关联知识库：{{ activeKbName }}</span>
           </div>
         </div>
+        <div class="flex items-center gap-2">
+          <!-- 对话摘要按钮 -->
+          <button
+            v-if="chat.activeSession?.summary"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+            :class="showSummary
+              ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+            title="查看 AI 对当前对话的理解摘要"
+            @click="showSummary = !showSummary"
+          >
+            <FileText :size="14" :stroke-width="2" />
+            <span>对话摘要</span>
+            <ChevronDown :size="14" class="transition-transform" :class="showSummary ? 'rotate-180' : ''" />
+          </button>
         <button
           class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
           :class="showThinking
@@ -330,7 +347,31 @@ function onKeyDown(e: KeyboardEvent) {
           <span>思考过程</span>
           <component :is="showThinking ? ChevronRight : ChevronLeft" :size="14" class="text-gray-400" />
         </button>
+        </div>
       </div>
+
+      <!-- 对话摘要面板（可折叠） -->
+      <transition
+        enter-active-class="transition-all duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-2 max-h-0"
+        enter-to-class="opacity-100 translate-y-0 max-h-40"
+        leave-active-class="transition-all duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0 max-h-40"
+        leave-to-class="opacity-0 -translate-y-2 max-h-0"
+      >
+        <div
+          v-if="showSummary && chat.activeSession?.summary"
+          class="px-5 py-3 bg-amber-50/60 dark:bg-amber-900/10 border-b border-amber-200/50 dark:border-amber-800/30 overflow-hidden"
+        >
+          <div class="flex items-start gap-2">
+            <FileText :size="14" class="text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+            <div class="min-w-0">
+              <div class="text-[10px] font-medium text-amber-600/70 dark:text-amber-400/70 uppercase tracking-wider mb-1">AI 对话记忆</div>
+              <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{{ chat.activeSession.summary }}</p>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- 消息流（relative 容器供"滚到底部"按钮定位） -->
       <div class="flex-1 relative overflow-hidden">

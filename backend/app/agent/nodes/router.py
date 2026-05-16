@@ -75,17 +75,11 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     )
     system_prompt = _ROUTER_SYSTEM_PROMPT.format(skills=skills_brief or "(暂无可用技能)")
 
-    # 构建 LLM 消息：注入对话历史上下文，帮助 Router 理解指代性表述（如“这个项目”）
-    summary = state.get("summary", "")
+    # 构建 LLM 消息：上下文由 context_prep 节点统一注入到 state.messages
     router_messages = [
         {"role": "system", "content": system_prompt},
+        *state.get("context_messages", []),  # 包含对话历史 + 当前用户输入
     ]
-    if summary:
-        router_messages.append({
-            "role": "system",
-            "content": f"以下是之前的对话上下文，请结合上下文判断用户意图：\n{summary}",
-        })
-    router_messages.append({"role": "user", "content": user_input})
 
     llm = get_llm()
     try:

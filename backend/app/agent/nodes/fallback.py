@@ -28,16 +28,13 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
     """闲聊 / 兜底节点"""
     started_at = time.time()
     user_input = state.get("user_input", "")
-    summary = state.get("summary", "")
     prev_error = state.get("error")
 
-    messages = [{"role": "system", "content": _CHITCHAT_SYSTEM_PROMPT}]
-    if summary:
-        messages.append({
-            "role": "system",
-            "content": f"以下是历史对话摘要，仅供参考：\n{summary}",
-        })
-    messages.append({"role": "user", "content": user_input})
+    # 上下文由 context_prep 统一注入到 state.context_messages
+    messages = [
+        {"role": "system", "content": _CHITCHAT_SYSTEM_PROMPT},
+        *state.get("context_messages", []),
+    ]
 
     llm = get_llm()
     try:
@@ -56,7 +53,7 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
             state, "fallback", started_at,
             input_summary={
                 "user_input": user_input[:60],
-                "has_summary": bool(summary),
+                "has_context": len(state.get("context_messages", [])) > 1,
                 "prev_error": prev_error,
             },
             output_summary={"answer_preview": answer[:80]},

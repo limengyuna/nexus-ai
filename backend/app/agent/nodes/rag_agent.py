@@ -51,14 +51,24 @@ _RAG_SYSTEM_PROMPT = """你是 NexusAI 知识库问答助手。请基于下面�
 5. 如果资料中有具体段落或来源信息，可以适当标注"""
 
 
-def _rewrite_query(llm, user_input: str, summary: str) -> str:
+def _extract_history_text(messages: list) -> str:
+    """从 state.messages 中提取对话历史文本（排除当前用户输入，即最后一条）"""
+    # messages 由 context_prep 注入，格式：[{role: system, content: 历史}, {role: user, content: 当前输入}]
+    history_parts = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            history_parts.append(msg.get("content", ""))
+    return "\n".join(history_parts)
+
+
+def _rewrite_query(llm, user_input: str, history_text: str) -> str:
     """查询改写：结合对话历史把模糊查询改写为具体查询"""
-    if not summary:
+    if not history_text:
         return user_input
     try:
         rewritten = llm.complete(
             messages=[{"role": "user", "content": _REWRITE_PROMPT.format(
-                history=summary, query=user_input,
+                history=history_text, query=user_input,
             )}],
             temperature=0,
             max_tokens=200,
@@ -77,7 +87,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     started_at = time.time()
     user_input = state.get("user_input", "")
     kb_id = state.get("kb_id")
-    summary = state.get("summary", "")
+    context_messages = state.get("context_messages", [])
+    history_text = _extract_history_text(context_messages)
 
     if kb_id is None:
         # Router 已经做了 fallback，正常不会进到这里；但保险起见处理一下
@@ -111,7 +122,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     llm = get_llm()
 
     # 查询改写：结合对话历史把模糊查询改写为具体查询
-    search_query = _rewrite_query(llm, user_input, summary)
+    search_query = _rewrite_query(llm, user_input, history_text)
 
     try:
         query_vec = embedder.embed_query(search_query)
@@ -169,13 +180,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 请基于上述参考资料回答。"""
 
     # ---------- 3. LLM 生成回答 ----------
-    # 构建消息：注入对话历史上下文，帮助 LLM 理解指代性表述
+    # 上下文由 context_prep 统一注入到 state.messages
     rag_messages = [{"role": "system", "content": _RAG_SYSTEM_PROMPT}]
-    if summary:
-        rag_messages.append({
-            "role": "system",
-            "content": f"以下是之前的对话上下文，可用于理解用户意图：\n{summary}",
-        })
+    # 展开 context_prep 注入的历史消息（不含最后一条 user 消息，用 user_prompt 替代）
+    for msg in context_messages:
+        if msg.get("role") != "user":
+            rag_messages.append(msg)
     rag_messages.append({"role": "user", "content": user_prompt})
 
     try:

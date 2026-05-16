@@ -57,6 +57,7 @@ class AgentState(TypedDict, total=False):
     # ---------- 上下文记忆 ----------
     summary: str                               # LLM 压缩的历史对话摘要
     messages: Annotated[List[Dict[str, Any]], add_messages]  # 当前轮次对话消息（追加式）
+    context_messages: List[Dict[str, Any]]     # context_prep 统一注入的上下文（纯 dict，不经过 reducer）
 
     # ---------- Router 决策 ----------
     intent: str                                # 意图标签：rag / tool / chitchat
@@ -95,6 +96,7 @@ def make_initial_state(
         kb_id=kb_id,
         summary=summary,
         messages=[],
+        context_messages=[],
         intent="",
         route_reason="",
         retrieved_docs=[],

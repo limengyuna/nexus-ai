@@ -3,10 +3,10 @@ LangGraph 主图编排
 
 拓扑：
 
-    START → router → [条件路由]
-                       ├── rag      → END
-                       ├── tool     → END
-                       └── chitchat → END
+    START → context_prep → router → [条件路由]
+                                      ├── rag      → END
+                                      ├── tool     → END
+                                      └── chitchat → END
 
 未来扩展点：
 - 在 rag/tool 之后加 "reflector" 节点做答案质量自检
@@ -17,7 +17,7 @@ from typing import Literal
 from langgraph.graph import END, START, StateGraph
 from loguru import logger
 
-from app.agent.nodes import fallback_node, rag_agent_node, router_node, tool_agent_node
+from app.agent.nodes import context_prep_node, fallback_node, rag_agent_node, router_node, tool_agent_node
 from app.agent.nodes.router import ROUTE_CHITCHAT, ROUTE_RAG, ROUTE_TOOL
 from app.agent.state import AgentState
 
@@ -43,13 +43,15 @@ def build_agent_graph():
     workflow = StateGraph(AgentState)
 
     # 注册节点
+    workflow.add_node("context_prep", context_prep_node)
     workflow.add_node("router", router_node)
     workflow.add_node("rag_agent", rag_agent_node)
     workflow.add_node("tool_agent", tool_agent_node)
     workflow.add_node("fallback", fallback_node)
 
-    # 入口：从 START 进入 router
-    workflow.add_edge(START, "router")
+    # 入口：从 START 进入 context_prep，再到 router
+    workflow.add_edge(START, "context_prep")
+    workflow.add_edge("context_prep", "router")
 
     # 条件路由
     workflow.add_conditional_edges(
@@ -68,7 +70,7 @@ def build_agent_graph():
     workflow.add_edge("fallback", END)
 
     compiled = workflow.compile()
-    logger.info("LangGraph 主图编译完成 (节点: router, rag_agent, tool_agent, fallback)")
+    logger.info("LangGraph 主图编译完成 (节点: context_prep, router, rag_agent, tool_agent, fallback)")
     return compiled
 
 

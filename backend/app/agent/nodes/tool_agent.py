@@ -153,12 +153,15 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         logger.info("[Tool Agent] 工具总计: {} 内部 + {} MCP 外部",
                      len(openai_tools) - len(mcp_schemas), len(mcp_schemas))
 
+    # 上下文由 context_prep 统一注入到 state.context_messages
+    context_messages = state.get("context_messages", [])
+
     if not openai_tools:
         # 没有可用工具，直接让 LLM 回答
         answer = llm.complete(
             messages=[
                 {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_input},
+                *context_messages,
             ],
             temperature=0.3,
         )
@@ -172,10 +175,10 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             ),
         }
 
-    # 多轮 function calling
+    # 多轮 function calling：注入 system prompt + 对话上下文 + 当前用户输入
     messages = [
         {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
-        {"role": "user", "content": user_input},
+        *context_messages,
     ]
     tool_call_records: List[ToolCallRecord] = []
     final_answer = ""
