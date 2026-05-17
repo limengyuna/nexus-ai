@@ -42,7 +42,7 @@ langgraph==0.2.34                 # Agent 状态机框架（核心）
 openai==1.57.0                    # 1.54 与 httpx 0.28+ 不兼容（proxies 参数已移除），1.57 修复
 tiktoken==0.8.0                   # Token 计算（摘要压缩判断阈值用）
 mcp==1.1.0                        # Anthropic 官方 MCP SDK（双向集成）
-duckduckgo-search==8.1.1          # 免 API key 的 web 搜索（给 research_assistant Skill 用）
+ddgs>=9.14                        # 免 API key 的 web 搜索（原 duckduckgo-search，v9 起改名）
 
 # ---------- 阶段五：企业化加固 ----------
 slowapi==0.1.9                    # FastAPI 限流中间件（防 LLM 滥用）

@@ -10,6 +10,7 @@
 - 单一职责：上下文注入逻辑集中在此，新增节点不需要关心上下文怎么来的
 - 参考了 LangGraph Checkpointer 的思想 + 中间件/拦截器模式
 """
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
 from loguru import logger
@@ -28,6 +29,16 @@ def context_prep_node(state: AgentState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
 
     context_messages = []
+
+    # 注入当前时间（参考 ChatGPT/Claude 做法：在 system 层提供准确时间，杜绝 LLM 编造日期）
+    # 明确使用 UTC+8 北京时间，避免 Docker 容器默认 UTC 导致时间差 8 小时
+    _CST = timezone(timedelta(hours=8))
+    now = datetime.now(_CST)
+    time_str = now.strftime("%Y年%m月%d日 %H:%M（%A）")
+    context_messages.append({
+        "role": "system",
+        "content": f"当前时间：{time_str}。如果用户询问实时信息（如当前时间、天气、新闻、股价等），请基于此时间回答或建议使用工具获取最新数据。",
+    })
 
     # 注入对话历史上下文（长期记忆 + 最近对话）
     if summary:
