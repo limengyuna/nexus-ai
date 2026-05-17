@@ -25,7 +25,7 @@ SUMMARY_TRIGGER_MESSAGES = 10
 # 压缩后保留最近 N 条消息原文（2 轮完整交互）
 KEEP_RECENT_MESSAGES = 4
 
-_SUMMARY_PROMPT = """你是对话摘要器。请把下面这段历史对话压缩成简短的摘要（不超过 300 字），
+_SUMMARY_PROMPT = """你是对话摘要器。请把下面这段历史对话压缩成简短的摘要（不超过 500 字），
 保留关键信息：用户的主要问题、Agent 给出的结论、提到的实体（如城市、人物、文件名等）。
 摘要将用于后续轮次的上下文，所以信息要紧凑准确。
 
@@ -145,7 +145,7 @@ class ChatService:
             new_summary = llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=500,
+                max_tokens=800,
             )
         except Exception as e:
             logger.warning("摘要压缩失败，跳过本次压缩: {}", e)
@@ -198,7 +198,7 @@ class ChatService:
         history_msgs = recent_msgs[:-1] if recent_msgs else []
         if history_msgs:
             recent_text = "\n".join(
-                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-6:]
+                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-8:]
             )
             if effective_summary:
                 effective_summary += f"\n\n最近对话记录：\n{recent_text}"
@@ -307,7 +307,7 @@ class ChatService:
         history_msgs = recent_msgs[:-1] if recent_msgs else []
         if history_msgs:
             recent_text = "\n".join(
-                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-6:]
+                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-8:]
             )
             if effective_summary:
                 effective_summary += f"\n\n最近对话记录：\n{recent_text}"

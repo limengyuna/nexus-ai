@@ -9,7 +9,7 @@ DeepSeek API 兼容 OpenAI Chat Completions 协议，所以直接用 openai 官�
 2. complete_stream()     —— 流式生成（用于对话场景，配合 SSE 推送给前端）
 3. complete_with_tools() —— Function Calling（用于 Tool Agent 决定调哪个工具）
 """
-from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
 
 from loguru import logger
 from openai import OpenAI
@@ -25,6 +25,7 @@ class LLMClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        thinking_enabled: Optional[bool] = None,
     ):
         api_key = api_key or settings.DEEPSEEK_API_KEY
         if not api_key:
@@ -39,7 +40,15 @@ class LLMClient:
             timeout=60.0,  # 整体超时 60s
         )
         self.model = model or settings.DEEPSEEK_MODEL
-        logger.info("LLMClient 初始化完成 (model={}, base_url={})", self.model, base_url or settings.DEEPSEEK_API_BASE)
+        # 思考模式开关：仅影响 deepseek-v4-pro 等支持思考的模型
+        self.thinking_enabled = thinking_enabled if thinking_enabled is not None else settings.DEEPSEEK_THINKING_ENABLED
+        logger.info("LLMClient 初始化完成 (model={}, thinking={}, base_url={})", self.model, self.thinking_enabled, base_url or settings.DEEPSEEK_API_BASE)
+
+    def _thinking_extra_body(self) -> Optional[Dict[str, Any]]:
+        """根据思考模式开关生成 extra_body 参数"""
+        if self.thinking_enabled:
+            return None  # 默认开启，不需要额外参数
+        return {"thinking": {"type": "disabled"}}
 
     # ---------- 一次性完整响应 ----------
     def complete(
@@ -57,13 +66,17 @@ class LLMClient:
         :param max_tokens: 最大输出 token 数
         :param response_format: 如 {"type": "json_object"} 强制返回 JSON
         """
-        resp = self._client.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
         )
+        extra = self._thinking_extra_body()
+        if extra:
+            kwargs["extra_body"] = extra
+        resp = self._client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content or ""
         usage = resp.usage
         logger.debug(
@@ -74,6 +87,42 @@ class LLMClient:
             usage.total_tokens if usage else "?",
         )
         return content
+
+    def complete_counted(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, Dict[str, int]]:
+        """
+        同步调用，返回 (回复文本, token 用量字典)
+
+        用量字典格式：{"prompt_tokens": N, "completion_tokens": N, "total_tokens": N}
+        """
+        kwargs: Dict[str, Any] = dict(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+        extra = self._thinking_extra_body()
+        if extra:
+            kwargs["extra_body"] = extra
+        resp = self._client.chat.completions.create(**kwargs)
+        content = resp.choices[0].message.content or ""
+        usage = resp.usage
+        usage_dict = {
+            "prompt_tokens": usage.prompt_tokens if usage else 0,
+            "completion_tokens": usage.completion_tokens if usage else 0,
+            "total_tokens": usage.total_tokens if usage else 0,
+        }
+        logger.debug(
+            "LLM 调用完成 [{}] in={} out={} total={}",
+            self.model, usage_dict["prompt_tokens"], usage_dict["completion_tokens"], usage_dict["total_tokens"],
+        )
+        return content, usage_dict
 
     # ---------- 流式响应（SSE 推送用） ----------
     def complete_stream(
@@ -90,13 +139,17 @@ class LLMClient:
             for chunk in llm.complete_stream(messages):
                 yield f"data: {chunk}\\n\\n"  # SSE
         """
-        stream = self._client.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
         )
+        extra = self._thinking_extra_body()
+        if extra:
+            kwargs["extra_body"] = extra
+        stream = self._client.chat.completions.create(**kwargs)
         for chunk in stream:
             if not chunk.choices:
                 continue
@@ -119,13 +172,17 @@ class LLMClient:
         :param tool_choice: "auto" / "none" / {"type": "function", "function": {"name": "xxx"}}
         :return: {"content": str, "tool_calls": list, "finish_reason": str}
         """
-        resp = self._client.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,
             temperature=temperature,
         )
+        extra = self._thinking_extra_body()
+        if extra:
+            kwargs["extra_body"] = extra
+        resp = self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         tool_calls_raw = choice.message.tool_calls or []
 
@@ -142,11 +199,19 @@ class LLMClient:
         # DeepSeek thinking mode 会返回 reasoning_content，多轮对话必须传回
         reasoning_content = getattr(choice.message, "reasoning_content", None)
 
+        usage = resp.usage
+        usage_dict = {
+            "prompt_tokens": usage.prompt_tokens if usage else 0,
+            "completion_tokens": usage.completion_tokens if usage else 0,
+            "total_tokens": usage.total_tokens if usage else 0,
+        }
+
         return {
             "content": choice.message.content or "",
             "tool_calls": tool_calls,
             "finish_reason": choice.finish_reason,
             "reasoning_content": reasoning_content,
+            "usage": usage_dict,
         }
 
 

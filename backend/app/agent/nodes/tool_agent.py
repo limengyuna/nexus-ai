@@ -148,13 +148,14 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
     if not openai_tools:
         # 没有可用工具，直接让 LLM 回答
-        answer = llm.complete(
+        answer, usage = llm.complete_counted(
             messages=[
                 {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
                 *context_messages,
             ],
             temperature=0.3,
         )
+        node_tokens += usage.get("total_tokens", 0)
         # 流式模式：推送答案 + 结束信号
         if token_queue:
             token_queue.put(("chunk", answer))
@@ -162,10 +163,11 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         return {
             "final_answer": answer,
             "tool_calls": [],
+            "total_tokens": state.get("total_tokens", 0) + node_tokens,
             "execution_trace": append_trace(
                 state, "tool_agent", started_at,
                 input_summary={"user_input": user_input[:60], "match": "no_tools"},
-                output_summary={"answer_preview": answer[:80]},
+                output_summary={"answer_preview": answer[:80], "tokens": node_tokens},
             ),
         }
 
@@ -177,6 +179,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     tool_call_records: List[ToolCallRecord] = []
     skill_used: Optional[str] = None
     final_answer = ""
+    node_tokens = 0
 
     MAX_TURNS = 6
     mcp_fail_count = 0  # 连续 MCP 失败计数
@@ -186,13 +189,15 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         if time.time() - loop_start > FC_LOOP_TIMEOUT:
             logger.warning("[Tool Agent] function calling 循环总超时 ({}s)", FC_LOOP_TIMEOUT)
             messages.append({"role": "user", "content": "时间已超时，请根据已获取的信息直接用中文回答用户问题。"})
-            final_answer = llm.complete(messages=messages, temperature=0.3)
+            final_answer, timeout_usage = llm.complete_counted(messages=messages, temperature=0.3)
+            node_tokens += timeout_usage.get("total_tokens", 0)
             break
         resp = llm.complete_with_tools(messages=messages, tools=openai_tools)
         finish_reason = resp["finish_reason"]
         content = resp["content"]
         tool_calls = resp["tool_calls"]
         reasoning_content = resp.get("reasoning_content")  # DeepSeek thinking mode
+        node_tokens += resp.get("usage", {}).get("total_tokens", 0)
 
         # LLM 决定直接回答（不调工具）
         if not tool_calls or finish_reason == "stop":
@@ -271,7 +276,8 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 if mcp_fail_count >= 2:
                     logger.warning("[Tool Agent] MCP 连续失败 {} 次，提前结束工具调用", mcp_fail_count)
                     messages.append({"role": "user", "content": "部分外部工具调用失败，请根据已获取的信息直接用中文回答用户问题。"})
-                    final_answer = llm.complete(messages=messages, temperature=0.3)
+                    final_answer, mcp_usage = llm.complete_counted(messages=messages, temperature=0.3)
+                    node_tokens += mcp_usage.get("total_tokens", 0)
                     break
             else:
                 # 内部原子工具
@@ -306,7 +312,8 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             "role": "user",
             "content": "请根据上述工具返回的信息，用中文自然语言回答用户的问题。不要再调用任何工具。",
         })
-        final_answer = llm.complete(messages=messages, temperature=0.3)
+        final_answer, max_usage = llm.complete_counted(messages=messages, temperature=0.3)
+        node_tokens += max_usage.get("total_tokens", 0)
 
     # 流式模式：推送最终答案 + 结束信号
     def _push_answer_and_done():
@@ -325,7 +332,8 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         if not cleaned:
             # 如果清理后为空，再强制一次总结
             messages.append({"role": "user", "content": "请直接用中文回答用户问题，不要使用任何标记或工具调用。"})
-            final_answer = llm.complete(messages=messages, temperature=0.3)
+            final_answer, dsml_usage = llm.complete_counted(messages=messages, temperature=0.3)
+            node_tokens += dsml_usage.get("total_tokens", 0)
         else:
             final_answer = cleaned
 
@@ -335,6 +343,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         "skill_used": skill_used,
         "tool_calls": tool_call_records,
         "final_answer": final_answer,
+        "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "tool_agent", started_at,
             input_summary={"user_input": user_input[:60], "match": "function_calling"},
@@ -342,6 +351,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 "tool_call_count": len(tool_call_records),
                 "tools_used": [r["name"] for r in tool_call_records],
                 "answer_preview": final_answer[:80],
+                "tokens": node_tokens,
             },
         ),
     }

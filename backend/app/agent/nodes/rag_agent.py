@@ -65,12 +65,12 @@ def _extract_history_text(messages: list) -> str:
     return "\n".join(history_parts)
 
 
-def _rewrite_query(llm, user_input: str, history_text: str) -> str:
-    """查询改写：结合对话历史把模糊查询改写为具体查询"""
+def _rewrite_query(llm, user_input: str, history_text: str) -> tuple:
+    """查询改写：结合对话历史把模糊查询改写为具体查询，返回 (query, tokens)"""
     if not history_text:
-        return user_input
+        return user_input, 0
     try:
-        rewritten = llm.complete(
+        rewritten, usage = llm.complete_counted(
             messages=[{"role": "user", "content": _REWRITE_PROMPT.format(
                 history=history_text, query=user_input,
             )}],
@@ -80,10 +80,10 @@ def _rewrite_query(llm, user_input: str, history_text: str) -> str:
         rewritten = rewritten.strip()
         if rewritten:
             logger.info("[RAG Agent] 查询改写: '{}' → '{}'", user_input[:40], rewritten[:60])
-            return rewritten
+            return rewritten, usage.get("total_tokens", 0)
     except Exception as e:
         logger.warning("[RAG Agent] 查询改写失败，使用原始查询: {}", e)
-    return user_input
+    return user_input, 0
 
 
 def rag_agent_node(state: AgentState) -> Dict[str, Any]:
@@ -143,7 +143,9 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     llm = get_llm_fast()
 
     # 查询改写：结合对话历史把模糊查询改写为具体查询
-    search_query = _rewrite_query(llm, user_input, history_text)
+    node_tokens = 0
+    search_query, rewrite_tokens = _rewrite_query(llm, user_input, history_text)
+    node_tokens += rewrite_tokens
 
     try:
         query_vec = embedder.embed_query(search_query)
@@ -231,13 +233,21 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
                 chunks.append(tok)
                 token_queue.put(("chunk", tok))
             answer = "".join(chunks)
+            # 流式模式粗估 token
+            try:
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base")
+                node_tokens += len(enc.encode(answer)) + 300
+            except Exception:
+                pass
         else:
             # ---------- 非流式兼容（chat_once 调用） ----------
-            answer = llm.complete(
+            answer, gen_usage = llm.complete_counted(
                 messages=rag_messages,
                 temperature=0.3,
                 max_tokens=800,
             )
+            node_tokens += gen_usage.get("total_tokens", 0)
     except Exception as e:
         logger.exception("[RAG Agent] LLM 生成失败: {}", e)
         err_msg = f"生成回答时出错: {e}"
@@ -257,6 +267,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     return {
         "retrieved_docs": retrieved_docs,
         "final_answer": answer,
+        "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "rag_agent", started_at,
             input_summary={"query": search_query[:60], "original_query": user_input[:60], "kb_id": kb_id, "top_k": DEFAULT_TOP_K},
@@ -264,6 +275,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
                 "hits": len(retrieved_docs),
                 "top_score": retrieved_docs[0]["score"],
                 "answer_preview": answer[:80],
+                "tokens": node_tokens,
             },
         ),
     }

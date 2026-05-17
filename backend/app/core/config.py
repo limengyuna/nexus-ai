@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_BASE: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-v4-pro"          # 重型模型：Tool Agent、Skills 等复杂推理
     DEEPSEEK_MODEL_FAST: str = "deepseek-v4-flash"   # 轻型模型：Router、闲聊、RAG 等简单任务
+    DEEPSEEK_THINKING_ENABLED: bool = True           # 是否启用 Pro 模型的思考模式（关闭可加速响应）
 
     # ---------- 阿里通义 Embedding API（后续阶段使用） ----------
     DASHSCOPE_API_KEY: str = ""

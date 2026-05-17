@@ -10,7 +10,7 @@
  * - 执行链路时间线
  */
 import { computed } from 'vue'
-import { Sparkles } from 'lucide-vue-next'
+import { Sparkles, Zap } from 'lucide-vue-next'
 
 import { useChatStore } from '@/stores/chat'
 
@@ -19,6 +19,30 @@ const chat = useChatStore()
 const hasData = computed(() =>
   chat.lastIntent || chat.lastTrace.length > 0 || chat.lastToolCalls.length > 0,
 )
+
+// 从 execution_trace 中提取每个节点的 token 消耗
+const nodeTokens = computed(() => {
+  return chat.lastTrace
+    .filter((step: any) => step.output?.tokens)
+    .map((step: any) => ({ node: step.node, tokens: step.output.tokens }))
+})
+
+// 本次回复总 token
+const totalTokens = computed(() => {
+  return nodeTokens.value.reduce((sum: number, item: any) => sum + item.tokens, 0)
+})
+
+// 会话累计 token
+const sessionTotalTokens = computed(() => {
+  return chat.messages
+    .filter((m: any) => m.role === 'assistant' && m.token_usage)
+    .reduce((sum: number, m: any) => sum + (m.token_usage || 0), 0)
+})
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
+}
 
 function formatArgs(args: any): string {
   try {
@@ -119,7 +143,38 @@ function intentColor(intent: string): string {
           >
             <span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span>
             <span class="font-mono font-medium text-gray-700 dark:text-gray-200">{{ step.node }}</span>
+            <span v-if="step.output?.tokens" class="text-amber-600 dark:text-amber-400">{{ formatTokens(step.output.tokens) }} tokens</span>
             <span class="text-gray-400 dark:text-gray-500 ml-auto">{{ step.elapsed_ms }}ms</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Token 用量 -->
+      <section v-if="totalTokens > 0">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5">
+          <Zap :size="13" class="text-amber-500" />
+          Token 用量
+        </div>
+        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-amber-50/40 dark:bg-amber-900/10">
+          <!-- 分节点明细 -->
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs mb-2">
+            <span
+              v-for="item in nodeTokens"
+              :key="item.node"
+              class="text-gray-600 dark:text-gray-300"
+            >
+              <span class="font-mono font-medium">{{ item.node }}</span>:
+              <span class="text-amber-700 dark:text-amber-300 font-semibold">{{ formatTokens(item.tokens) }}</span>
+            </span>
+          </div>
+          <!-- 总计 -->
+          <div class="flex items-center justify-between text-xs pt-2 border-t border-gray-200 dark:border-gray-700">
+            <span class="text-gray-500 dark:text-gray-400">本次回复</span>
+            <span class="font-semibold text-amber-700 dark:text-amber-300">{{ formatTokens(totalTokens) }} tokens</span>
+          </div>
+          <div v-if="sessionTotalTokens > 0" class="flex items-center justify-between text-xs mt-1">
+            <span class="text-gray-500 dark:text-gray-400">会话累计</span>
+            <span class="font-medium text-gray-600 dark:text-gray-300">{{ formatTokens(sessionTotalTokens) }} tokens</span>
           </div>
         </div>
       </section>

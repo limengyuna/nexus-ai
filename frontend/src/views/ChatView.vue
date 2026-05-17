@@ -5,7 +5,7 @@
  * 三栏布局：会话列表 | 消息区 | 思考过程
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ArrowDown, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Library, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Library, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Trash2, X, Zap } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import MessageBubble from '@/components/MessageBubble.vue'
@@ -29,6 +29,19 @@ const newSessionKbId = ref<number | null>(null)
 const showThinking = ref(false)  // 默认折叠，让消息区获得最大可用空间
 const errorMsg = ref('')
 const showSummary = ref(false)
+const sidebarCollapsed = ref(false)
+
+// 会话累计 token
+const sessionTotalTokens = computed(() => {
+  return chat.messages
+    .filter((m) => m.role === 'assistant' && m.token_usage)
+    .reduce((sum, m) => sum + (m.token_usage || 0), 0)
+})
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
+}
 
 // UTC 时间戳转本地时间显示
 function formatLocalTime(utcStr: string | undefined | null): string {
@@ -225,8 +238,16 @@ function onKeyDown(e: KeyboardEvent) {
 
 <template>
   <div class="flex h-full">
-    <!-- 第一栏：会话列表 -->
-    <div class="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
+    <!-- 第一栏：会话列表（可收折） -->
+    <transition
+      enter-active-class="transition-all duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-x-4 max-w-0"
+      enter-to-class="opacity-100 translate-x-0 max-w-64"
+      leave-active-class="transition-all duration-150 ease-in"
+      leave-from-class="opacity-100 translate-x-0 max-w-64"
+      leave-to-class="opacity-0 -translate-x-4 max-w-0"
+    >
+    <div v-if="!sidebarCollapsed" class="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0">
       <div class="p-3 border-b border-gray-200 dark:border-gray-800 space-y-2">
         <button
           class="w-full py-2 px-3 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1.5"
@@ -317,12 +338,22 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </div>
     </div>
+    </transition>
 
     <!-- 第二栏：消息区 -->
     <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-950">
       <!-- 顶部 -->
       <div class="h-14 px-5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between flex-shrink-0">
-        <div class="min-w-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <!-- 侧边栏收折按钮 -->
+          <button
+            class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
+            :title="sidebarCollapsed ? '展开会话列表' : '收起会话列表'"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+          >
+            <PanelLeftOpen v-if="sidebarCollapsed" :size="18" :stroke-width="2" />
+            <PanelLeftClose v-else :size="18" :stroke-width="2" />
+          </button>
           <div class="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
             {{ chat.activeSession?.title ?? '请选择或创建一个会话' }}
           </div>
@@ -382,6 +413,10 @@ function onKeyDown(e: KeyboardEvent) {
               <div class="mt-2 flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
                 <span>创建：{{ formatLocalTime(chat.activeSession.created_at) }}</span>
                 <span>更新：{{ formatLocalTime(chat.activeSession.updated_at) }}</span>
+                <span v-if="sessionTotalTokens > 0" class="flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                  <Zap :size="10" />
+                  累计 {{ formatTokens(sessionTotalTokens) }} tokens
+                </span>
               </div>
             </div>
           </div>

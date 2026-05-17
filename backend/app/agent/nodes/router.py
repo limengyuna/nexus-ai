@@ -127,15 +127,17 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     llm = get_llm_fast()
     intent = ROUTE_CHITCHAT
     reason = ""
+    node_tokens = 0
     # DeepSeek Flash 偶尔返回空内容，重试一次提高稳定性
     for attempt in range(2):
         try:
-            raw = llm.complete(
+            raw, usage = llm.complete_counted(
                 messages=router_messages,
                 temperature=0,
                 response_format={"type": "json_object"},
                 max_tokens=200,
             )
+            node_tokens += usage.get("total_tokens", 0)
             if not raw or not raw.strip():
                 logger.warning("[Router] LLM 返回空内容（第 {} 次），重试", attempt + 1)
                 continue
@@ -166,9 +168,10 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     return {
         "intent": intent,
         "route_reason": reason,
+        "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "router", started_at,
             input_summary={"user_input": user_input[:80], "has_kb": has_kb},
-            output_summary={"intent": intent, "reason": reason},
+            output_summary={"intent": intent, "reason": reason, "tokens": node_tokens},
         ),
     }

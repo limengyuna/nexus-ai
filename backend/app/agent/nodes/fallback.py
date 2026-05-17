@@ -56,6 +56,7 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
         _push_meta(token_queue, state)
 
     llm = get_llm_fast()
+    node_tokens = 0
     try:
         if token_queue:
             # ---------- 真流式：逐 token 推送给前端 ----------
@@ -69,9 +70,17 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
                 chunks.append(tok)
                 token_queue.put(("chunk", tok))
             answer = "".join(chunks)
+            # 流式模式无法精确计数，用 tiktoken 估算输出 token 数
+            try:
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base")
+                node_tokens = len(enc.encode(answer)) + 200  # 粗估输入
+            except Exception:
+                pass
         else:
             # ---------- 非流式兼容（chat_once 调用） ----------
-            answer = llm.complete(messages=messages, temperature=0.6, max_tokens=400)
+            answer, usage = llm.complete_counted(messages=messages, temperature=0.6, max_tokens=400)
+            node_tokens = usage.get("total_tokens", 0)
             if prev_error:
                 answer = f"（前置处理出错：{prev_error}）\n\n{answer}"
     except Exception as e:
@@ -86,6 +95,7 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
 
     return {
         "final_answer": answer,
+        "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "fallback", started_at,
             input_summary={
@@ -93,6 +103,6 @@ def fallback_node(state: AgentState) -> Dict[str, Any]:
                 "has_context": len(state.get("context_messages", [])) > 1,
                 "prev_error": prev_error,
             },
-            output_summary={"answer_preview": answer[:80]},
+            output_summary={"answer_preview": answer[:80], "tokens": node_tokens},
         ),
     }
