@@ -236,7 +236,12 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 else:
                     try:
                         skill_input = args.get("user_input", user_input)
-                        skill_result = skill_obj.execute(skill_input)
+                        # 把对话上下文传给 Skill，让内部 LLM 能感知历史信息（如用户姓名）
+                        skill_context = {
+                            "kb_id": state.get("kb_id"),
+                            "context_messages": context_messages,
+                        }
+                        skill_result = skill_obj.execute(skill_input, context=skill_context)
                         tool_result = skill_result.get("answer", "")
                         # 记录 Skill 内部的工具调用链
                         for stc in skill_result.get("tool_calls", []):

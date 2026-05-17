@@ -27,8 +27,23 @@ class DataAnalystSkill(BaseSkill):
     trigger_keywords = ["计算一下", "算一下", "帮我算", "等于多少", "几等于几", "calculate"]
 
     def execute(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        context = context or {}
+        context_messages = context.get("context_messages", [])
+
         from app.agent.llm import get_llm
         llm = get_llm()
+
+        # 拼接对话历史摘要，让 LLM 感知用户之前提到的数据、背景等信息
+        history_hint = ""
+        if context_messages:
+            parts = []
+            for msg in context_messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role in ("user", "assistant") and content:
+                    parts.append(f"{role}: {content}")
+            if parts:
+                history_hint = "\n对话历史（可能含用户之前提到的数据）：\n" + "\n".join(parts[-6:]) + "\n"
 
         # ---------- 1. LLM 抽取数学表达式列表 ----------
         extract_messages = [
@@ -37,11 +52,12 @@ class DataAnalystSkill(BaseSkill):
                 "content": (
                     "你是表达式抽取器。把用户的自然语言数学问题转换为可被 Python eval 安全求值的表达式。"
                     "支持 + - * / ** %、sqrt/log/sin/cos 等函数、常量 pi/e。"
+                    "结合对话历史中用户提到的数据来理解当前问题。"
                     '严格输出 JSON 格式：{"expressions": ["表达式1", "表达式2", ...]}'
                     "如果用户问题不包含可计算的数学内容，输出空数组。"
                 ),
             },
-            {"role": "user", "content": user_input},
+            {"role": "user", "content": f"{history_hint}用户问题：{user_input}"},
         ]
         extract_raw = llm.complete(
             messages=extract_messages,
@@ -73,19 +89,19 @@ class DataAnalystSkill(BaseSkill):
         if not results:
             # 没有可计算内容，直接 LLM 自由回答
             interpret_messages = [
-                {"role": "system", "content": "你是一位数据分析师，用简洁专业的语言回答用户的数据问题。"},
-                {"role": "user", "content": user_input},
+                {"role": "system", "content": "你是一位数据分析师，用简洁专业的语言回答用户的数据问题。结合对话历史理解用户意图。"},
+                {"role": "user", "content": f"{history_hint}用户问题：{user_input}"},
             ]
         else:
             interpret_messages = [
                 {
                     "role": "system",
-                    "content": "你是一位数据分析师。基于精确计算结果，给出简洁的中文解读，必要时给出业务洞察。",
+                    "content": "你是一位数据分析师。基于精确计算结果，给出简洁的中文解读，必要时给出业务洞察。结合对话历史理解上下文。",
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"用户问题：{user_input}\n\n"
+                        f"{history_hint}用户问题：{user_input}\n\n"
                         f"我已经精确计算得到以下结果：\n"
                         f"{json.dumps(results, ensure_ascii=False, indent=2)}\n\n"
                         "请用中文回答用户。"

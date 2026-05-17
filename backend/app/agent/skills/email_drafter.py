@@ -41,10 +41,13 @@ class EmailDrafterSkill(BaseSkill):
     ]
 
     def execute(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        context = context or {}
+        # 对话上下文（含用户姓名、历史消息等）
+        context_messages = context.get("context_messages", [])
         tool_calls = []
 
         # ---------- Step 1: LLM 抽取邮件元素 ----------
-        elements = self._llm_extract(user_input)
+        elements = self._llm_extract(user_input, context_messages)
         logger.info("[Skill:{}] 抽取的邮件元素: {}", self.name, elements)
         tool_calls.append({
             "name": "llm_extract_elements",
@@ -54,7 +57,7 @@ class EmailDrafterSkill(BaseSkill):
         })
 
         # ---------- Step 2: LLM 基于元素生成邮件 ----------
-        email_md = self._llm_compose(user_input, elements)
+        email_md = self._llm_compose(user_input, elements, context_messages)
         tool_calls.append({
             "name": "llm_compose_email",
             "kind": "llm",
@@ -73,19 +76,31 @@ class EmailDrafterSkill(BaseSkill):
         }
 
     # ---------- Step 1: 抽取元素 ----------
-    def _llm_extract(self, user_input: str) -> Dict[str, Any]:
+    def _llm_extract(self, user_input: str, context_messages: list = None) -> Dict[str, Any]:
         """让 LLM 把口语化需求分解为结构化元素"""
         from app.agent.llm import get_llm
 
         llm = get_llm()
+        # 拼接对话历史摘要，让 LLM 感知用户姓名等信息
+        history_hint = ""
+        if context_messages:
+            parts = []
+            for msg in context_messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role in ("user", "assistant") and content:
+                    parts.append(f"{role}: {content}")
+            if parts:
+                history_hint = "\n对话历史（可能含用户姓名等信息）：\n" + "\n".join(parts[-6:]) + "\n"
         prompt = [
             {
                 "role": "system",
                 "content": (
-                    "你是邮件助手。基于用户的口语化需求，抽取邮件的关键元素。\n"
+                    "你是邮件助手。基于用户的口语化需求和对话上下文，抽取邮件的关键元素。\n"
                     "**只输出严格的 JSON 对象**，键固定为：\n"
                     "  - recipient_role: 收件人角色（如「直属上级」「客户」「老师」「合作方」）\n"
-                    "  - sender_role: 发件人自称（如「员工」「学生」「乙方」，找不到就写「我」）\n"
+                    "  - sender_name: 发件人姓名（从对话历史中提取，找不到则留空）\n"
+                    "  - sender_role: 发件人角色（如「员工」「学生」「乙方」，找不到就写「我」）\n"
                     "  - purpose: 邮件目的（一句话，如「请假申请」「项目延期说明」）\n"
                     "  - tone: 推荐语气（取值：formal / friendly / apologetic / urgent / casual）\n"
                     "  - key_points: 关键信息列表（数组，按邮件应该呈现的顺序）\n"
@@ -95,7 +110,7 @@ class EmailDrafterSkill(BaseSkill):
             },
             {
                 "role": "user",
-                "content": f"用户需求：{user_input}",
+                "content": f"{history_hint}用户需求：{user_input}",
             },
         ]
         raw = llm.complete(messages=prompt, temperature=0.2, max_tokens=500)
@@ -120,7 +135,7 @@ class EmailDrafterSkill(BaseSkill):
         }
 
     # ---------- Step 2: 生成邮件 ----------
-    def _llm_compose(self, user_input: str, elements: Dict[str, Any]) -> str:
+    def _llm_compose(self, user_input: str, elements: Dict[str, Any], context_messages: list = None) -> str:
         """基于结构化元素生成专业邮件"""
         from app.agent.llm import get_llm
 

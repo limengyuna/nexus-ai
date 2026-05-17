@@ -14,6 +14,7 @@
 """
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -65,24 +66,33 @@ class ResearchAssistantSkill(BaseSkill):
             "result": search_queries,
         })
 
-        # ---------- Step 2: 多次 web 搜索 ----------
+        # ---------- Step 2: 并行 web 搜索（线程池，主流做法参考 Perplexity） ----------
         web_results: List[Dict[str, str]] = []  # {title, url, snippet, query}
-        for q in search_queries:
-            search_resp = self._call_tool(
+
+        def _do_search(q: str) -> Dict[str, Any]:
+            """单次搜索（在子线程中执行）"""
+            resp = self._call_tool(
                 "web_search", query=q, max_results=self._RESULTS_PER_QUERY,
             )
-            tool_calls.append({
-                "name": "web_search",
-                "kind": "tool",
-                "arguments": {"query": q, "max_results": self._RESULTS_PER_QUERY},
-                "result": (
-                    f"返回 {len(search_resp.get('results', []))} 条"
-                    if search_resp.get("ok") else f"失败: {search_resp.get('error')}"
-                ),
-            })
-            if search_resp.get("ok"):
-                for r in search_resp["results"]:
-                    web_results.append({**r, "query": q})
+            return {"query": q, "resp": resp}
+
+        with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
+            futures = {pool.submit(_do_search, q): q for q in search_queries}
+            for future in as_completed(futures):
+                result = future.result()
+                q, search_resp = result["query"], result["resp"]
+                tool_calls.append({
+                    "name": "web_search",
+                    "kind": "tool",
+                    "arguments": {"query": q, "max_results": self._RESULTS_PER_QUERY},
+                    "result": (
+                        f"返回 {len(search_resp.get('results', []))} 条"
+                        if search_resp.get("ok") else f"失败: {search_resp.get('error')}"
+                    ),
+                })
+                if search_resp.get("ok"):
+                    for r in search_resp["results"]:
+                        web_results.append({**r, "query": q})
 
         # 去重（按 url）
         seen_urls = set()
@@ -154,9 +164,10 @@ class ResearchAssistantSkill(BaseSkill):
 
     # ---------- 内部：LLM 拆解搜索关键词 ----------
     def _llm_decompose(self, user_input: str) -> List[str]:
-        from app.agent.llm import get_llm
+        # 关键词拆解是轻任务，用 Flash 模型即可（参考 Perplexity 分级模型策略）
+        from app.agent.llm import get_llm_fast
 
-        llm = get_llm()
+        llm = get_llm_fast()
         prompt = [
             {
                 "role": "system",

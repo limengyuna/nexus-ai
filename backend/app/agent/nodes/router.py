@@ -125,20 +125,30 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     ]
 
     llm = get_llm_fast()
-    try:
-        raw = llm.complete(
-            messages=router_messages,
-            temperature=0,
-            response_format={"type": "json_object"},
-            max_tokens=200,
-        )
-        parsed = json.loads(raw)
-        intent = parsed.get("intent", ROUTE_CHITCHAT).lower()
-        reason = parsed.get("reason", "")
-    except (json.JSONDecodeError, Exception) as e:
-        logger.warning("[Router] LLM 路由失败，降级到 chitchat: {}", e)
-        intent = ROUTE_CHITCHAT
-        reason = f"LLM 路由失败({e})，降级闲聊"
+    intent = ROUTE_CHITCHAT
+    reason = ""
+    # DeepSeek Flash 偶尔返回空内容，重试一次提高稳定性
+    for attempt in range(2):
+        try:
+            raw = llm.complete(
+                messages=router_messages,
+                temperature=0,
+                response_format={"type": "json_object"},
+                max_tokens=200,
+            )
+            if not raw or not raw.strip():
+                logger.warning("[Router] LLM 返回空内容（第 {} 次），重试", attempt + 1)
+                continue
+            parsed = json.loads(raw)
+            intent = parsed.get("intent", ROUTE_CHITCHAT).lower()
+            reason = parsed.get("reason", "")
+            break  # 解析成功，跳出重试
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning("[Router] LLM 路由失败（第 {} 次）: {}", attempt + 1, e)
+            if attempt == 1:
+                # 两次都失败，降级到 chitchat
+                intent = ROUTE_CHITCHAT
+                reason = f"LLM 路由失败({e})，降级闲聊"
 
     # ---------- 后处理：若意图为 rag 但没有绑定知识库，降级到 chitchat ----------
     if intent == ROUTE_RAG and not has_kb:
