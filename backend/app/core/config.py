@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # 当 DASHSCOPE_API_KEY 为空时自动回退到 Mock Embedder（开发友好）
     EMBEDDING_PROVIDER: str = "auto"  # auto / tongyi / mock
 
+    # ---------- Tavily Search API ----------
+    TAVILY_API_KEY: str = ""
+
     # ---------- 文件上传 ----------
     UPLOAD_DIR: str = "./data/uploads"
     MAX_UPLOAD_SIZE_MB: int = 50

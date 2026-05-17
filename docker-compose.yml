@@ -84,6 +84,7 @@ services:
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       DEEPSEEK_MODEL_FAST: ${DEEPSEEK_MODEL_FAST:-deepseek-v4-flash}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi
       # CORS
@@ -130,6 +131,7 @@ services:
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       DEEPSEEK_MODEL_FAST: ${DEEPSEEK_MODEL_FAST:-deepseek-v4-flash}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?需要在 .env 中设置 DASHSCOPE_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       LLM_PROVIDER: deepseek
       EMBEDDING_PROVIDER: tongyi
     volumes:

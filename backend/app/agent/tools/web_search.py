@@ -1,12 +1,13 @@
 """
 Web 搜索工具
 
-基于 ddgs 库（原 duckduckgo-search，免 API key），失败时优雅降级。
+基于 Tavily Search API（AI 专用搜索引擎，LangChain/Perplexity 等主流产品使用）。
+中文搜索质量优于 DuckDuckGo，需要 API Key（免费 1000 次/月）。
 
 注意：
 - 搜索服务偶尔会限流或超时，所以对外只暴露 ok/error，
   不抛异常，让 Skill 编排可以判断后继续走 LLM
-- 返回前 N 条结果（title / url / body 摘要）
+- 返回前 N 条结果（title / url / snippet 摘要）
 - 不抓正文，避免单次响应过长（如要抓正文可以另起一个 fetch_url Tool）
 """
 from typing import Any, Dict, List
@@ -26,7 +27,7 @@ class WebSearchArgs(BaseModel):
 @register_tool
 class WebSearchTool(BaseTool):
     """
-    通用 web 搜索（DuckDuckGo 后端，免 API key）。
+    通用 web 搜索（Tavily Search API 后端）。
 
     返回结构示例:
         {
@@ -50,21 +51,33 @@ class WebSearchTool(BaseTool):
     def run(self, **kwargs) -> Dict[str, Any]:
         params = WebSearchArgs(**kwargs)
         try:
-            # 延迟导入，避免启动时连第三方库
-            from ddgs import DDGS
+            # 延迟导入，避免启动时加载第三方库
+            from tavily import TavilyClient
+            from app.core.config import settings
 
-            # ddgs v9+ API：text() 返回 list[dict]，不再需要 context manager
-            raw_results = DDGS().text(
-                params.query,
+            if not settings.TAVILY_API_KEY:
+                return {
+                    "ok": False,
+                    "query": params.query,
+                    "results": [],
+                    "error": "TAVILY_API_KEY 未配置，请在 .env 中设置",
+                }
+
+            client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+            response = client.search(
+                query=params.query,
                 max_results=params.max_results,
+                search_depth="basic",       # basic 更快；advanced 更深但更慢
+                include_answer=False,        # 不需要 Tavily 自己的 AI 回答
             )
+
             results: List[Dict[str, str]] = [
                 {
                     "title": r.get("title", ""),
-                    "url": r.get("href", "") or r.get("url", ""),
-                    "snippet": r.get("body", "") or r.get("snippet", ""),
+                    "url": r.get("url", ""),
+                    "snippet": r.get("content", ""),
                 }
-                for r in raw_results
+                for r in response.get("results", [])
             ]
 
             logger.debug("[web_search] query={!r} -> {} 条", params.query, len(results))
