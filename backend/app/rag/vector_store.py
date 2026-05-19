@@ -63,6 +63,18 @@ class BaseVectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        query_embedding: List[float],
+        top_k: int = 5,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]:
+        """双路检索（向量检索 + BM25 关键词检索），并通过 RRF 融合"""
+        raise NotImplementedError
+
+    @abstractmethod
     def delete_by_metadata(
         self,
         collection_name: str,
@@ -178,6 +190,142 @@ class ChromaVectorStore(BaseVectorStore):
         logger.debug("检索 [{}] top_k={} 返回 {} 条", collection_name, top_k, len(results))
         return results
 
+    def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        query_embedding: List[float],
+        top_k: int = 5,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]:
+        # 1. 密路（密集向量）检索：稍许放大候选集至 top_k * 2
+        dense_hits = self.search(
+            collection_name=collection_name,
+            query_embedding=query_embedding,
+            top_k=top_k * 2,
+            where=where,
+        )
+
+        # 2. 疏路（BM25 关键词）检索
+        # 拉取该集合下满足过滤条件的全量文本分块（上限为 2000 个以保证性能）
+        all_hits = self.list_by_metadata(
+            collection_name=collection_name,
+            where=where or {},
+            limit=2000,
+        )
+
+        if not all_hits:
+            return dense_hits[:top_k]
+
+        import re
+        import math
+
+        # 简易中英文混合分词器：保留汉字单字、连续英文单词和数字
+        def tokenize(text: str) -> List[str]:
+            pattern = re.compile(r"[\u4e00-\u9fa5]|[a-zA-Z0-9]+")
+            return pattern.findall(text.lower())
+
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return dense_hits[:top_k]
+
+        # 动态构建倒排索引并计算 BM25 分数
+        corpus = [tokenize(h.content) for h in all_hits]
+        corpus_size = len(corpus)
+        avg_doc_len = sum(len(doc) for doc in corpus) / (corpus_size or 1)
+        doc_lens = [len(doc) for doc in corpus]
+
+        # 计算文档频率（DF）
+        doc_freqs = {}
+        for doc in corpus:
+            for term in set(doc):
+                doc_freqs[term] = doc_freqs.get(term, 0) + 1
+
+        # 计算逆文档频率（IDF）
+        idfs = {}
+        for term, freq in doc_freqs.items():
+            idfs[term] = math.log((corpus_size - freq + 0.5) / (freq + 0.5) + 1.0)
+
+        # 对每个 Chunk 计算 BM25 得分
+        k1 = 1.5
+        b = 0.75
+        scored_hits = []
+        for idx, hit in enumerate(all_hits):
+            tf_dict = {}
+            for term in corpus[idx]:
+                tf_dict[term] = tf_dict.get(term, 0) + 1
+
+            score = 0.0
+            doc_len = doc_lens[idx]
+            for term in query_tokens:
+                if term not in tf_dict:
+                    continue
+                tf = tf_dict[term]
+                idf = idfs.get(term, 0.0)
+                term_score = (
+                    idf
+                    * (tf * (k1 + 1))
+                    / (tf + k1 * (1 - b + b * doc_len / avg_doc_len))
+                )
+                score += term_score
+
+            if score > 0.0:
+                scored_hits.append((hit, score))
+
+        # 排序并取前 top_k * 2 个分块作为 BM25 的召回结果
+        scored_hits.sort(key=lambda x: x[1], reverse=True)
+        sparse_hits = [item[0] for item in scored_hits[: top_k * 2]]
+
+        # 3. RRF (Reciprocal Rank Fusion) 双路合并
+        k_rrf = 60
+        rrf_scores = {}
+        hit_map = {}
+
+        for rank, hit in enumerate(dense_hits, 1):
+            rrf_scores[hit.chunk_id] = rrf_scores.get(hit.chunk_id, 0.0) + 1.0 / (k_rrf + rank)
+            hit_map[hit.chunk_id] = hit
+
+        for rank, hit in enumerate(sparse_hits, 1):
+            rrf_scores[hit.chunk_id] = rrf_scores.get(hit.chunk_id, 0.0) + 1.0 / (k_rrf + rank)
+            if hit.chunk_id not in hit_map:
+                hit_map[hit.chunk_id] = hit
+
+        # 按 RRF 得分降序排序并裁剪出最终的 top_k 个结果
+        sorted_chunk_ids = sorted(
+            rrf_scores.keys(), key=lambda cid: rrf_scores[cid], reverse=True
+        )
+
+        # 4. 构造 SearchResult，把 RRF 得分映射为伪距离（0.0 ~ 2.0，越小越相似），契合下游的阈值过滤
+        max_possible_rrf = 2.0 / (k_rrf + 1)
+        merged_hits = []
+        for cid in sorted_chunk_ids[:top_k]:
+            original_hit = hit_map[cid]
+            rrf_val = rrf_scores[cid]
+
+            # rrf_val 的范围大约在 (1/120) 到 (2/61 ≈ 0.0328)
+            # 我们将其线性映射到 0.1 ~ 0.9 的伪距离区间
+            pseudo_dist = 0.9 - (rrf_val / max_possible_rrf) * 0.8
+            pseudo_dist = max(0.01, min(1.99, pseudo_dist))
+
+            merged_hits.append(
+                SearchResult(
+                    chunk_id=original_hit.chunk_id,
+                    content=original_hit.content,
+                    metadata=original_hit.metadata,
+                    score=pseudo_dist,
+                )
+            )
+
+        logger.info(
+            "[Hybrid Search] collection={} query={!r} 召回数量 (dense={}, sparse={}) -> 合并输出={}",
+            collection_name,
+            query,
+            len(dense_hits),
+            len(sparse_hits),
+            len(merged_hits),
+        )
+        return merged_hits
+
     def delete_by_metadata(
         self,
         collection_name: str,
@@ -201,7 +349,10 @@ class ChromaVectorStore(BaseVectorStore):
         except Exception:
             return []
         # Chroma 的 collection.get 支持按 where 过滤；不需要 embedding
-        raw = collection.get(where=where, limit=limit, include=["documents", "metadatas"])
+        get_kwargs = {"limit": limit, "include": ["documents", "metadatas"]}
+        if where:
+            get_kwargs["where"] = where
+        raw = collection.get(**get_kwargs)
         ids = raw.get("ids") or []
         docs = raw.get("documents") or []
         metas = raw.get("metadatas") or []

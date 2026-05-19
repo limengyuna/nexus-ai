@@ -156,8 +156,9 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 
     try:
         query_vec = embedder.embed_query(search_query)
-        raw_hits = vector_store.search(
+        raw_hits = vector_store.hybrid_search(
             collection_name=collection_name,
+            query=search_query,
             query_embedding=query_vec,
             top_k=DEFAULT_TOP_K,
         )

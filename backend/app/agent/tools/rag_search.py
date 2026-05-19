@@ -58,8 +58,9 @@ class RAGSearchTool(BaseTool):
         query_vec = embedder.embed_query(params.query)
 
         vector_store = get_vector_store()
-        raw_hits = vector_store.search(
+        raw_hits = vector_store.hybrid_search(
             collection_name=collection_name,
+            query=params.query,
             query_embedding=query_vec,
             top_k=params.top_k,
         )
