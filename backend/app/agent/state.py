@@ -26,12 +26,13 @@ class TraceStep(TypedDict, total=False):
     error: Optional[str]         # 错误信息（如有）
 
 
-class RetrievedDoc(TypedDict):
+class RetrievedDoc(TypedDict, total=False):
     """RAG 检索回来的单条结果"""
     chunk_id: str
     content: str
     score: float
     metadata: Dict[str, Any]
+    adopted: bool  # 是否通过软过滤被 LLM 实际采用
 
 
 class ToolCallRecord(TypedDict, total=False):

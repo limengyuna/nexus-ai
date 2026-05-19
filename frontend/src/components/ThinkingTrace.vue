@@ -6,15 +6,26 @@
  * - Intent + 路由理由
  * - 命中的 Skill
  * - 工具调用详情
- * - RAG 检索结果（前几条）
+ * - RAG 检索结果（前几条，可展开完整内容）
  * - 执行链路时间线
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Sparkles, Zap } from 'lucide-vue-next'
 
 import { useChatStore } from '@/stores/chat'
 
 const chat = useChatStore()
+
+// RAG 片段展开状态（key 为索引）
+const expandedDocs = ref<Set<number>>(new Set())
+
+function toggleDoc(index: number) {
+  if (expandedDocs.value.has(index)) {
+    expandedDocs.value.delete(index)
+  } else {
+    expandedDocs.value.add(index)
+  }
+}
 
 const hasData = computed(() =>
   chat.lastIntent || chat.lastTrace.length > 0 || chat.lastToolCalls.length > 0,
@@ -121,13 +132,29 @@ function intentColor(intent: string): string {
           <div
             v-for="(doc, i) in chat.lastRetrievedDocs.slice(0, 5)"
             :key="i"
-            class="border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 bg-blue-50/40 dark:bg-blue-900/20"
+            class="border rounded-lg p-2.5 cursor-pointer transition-colors"
+            :class="doc.adopted !== false
+              ? 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-900/20 hover:bg-blue-50/70 dark:hover:bg-blue-900/30'
+              : 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/30 opacity-60 hover:opacity-80'"
+            @click="toggleDoc(i)"
           >
             <div class="flex items-center justify-between mb-1">
-              <span class="text-xs font-medium text-blue-700 dark:text-blue-300">#{{ i + 1 }} {{ doc.metadata.file_name || '未知来源' }}</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">score={{ doc.score.toFixed(4) }}</span>
+              <span class="text-xs font-medium" :class="doc.adopted !== false ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'">
+                #{{ i + 1 }} {{ doc.metadata.file_name || '未知来源' }}
+                <span v-if="doc.adopted === false" class="ml-1 text-gray-400 dark:text-gray-500">(未采用)</span>
+              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs" :class="doc.adopted !== false ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'">score={{ doc.score.toFixed(4) }}</span>
+                <span class="text-xs text-gray-400 dark:text-gray-500 select-none">{{ expandedDocs.has(i) ? '▼' : '▶' }}</span>
+              </div>
             </div>
-            <p class="text-xs text-gray-700 dark:text-gray-300 line-clamp-3">{{ doc.content }}</p>
+            <p
+              class="text-xs whitespace-pre-wrap break-words"
+              :class="[
+                doc.adopted !== false ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400',
+                { 'line-clamp-3': !expandedDocs.has(i) }
+              ]"
+            >{{ doc.content }}</p>
           </div>
         </div>
       </section>

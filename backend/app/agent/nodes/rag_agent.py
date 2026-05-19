@@ -27,6 +27,11 @@ from app.rag.vector_store import get_vector_store
 # 默认检索的 top_k
 DEFAULT_TOP_K = 5
 
+# 软过滤阈值：余弦距离超过此值的 chunk 视为低相关度
+# ChromaDB 返回的 score 为余弦距离（越小越相关，范围 0~2）
+# 过滤后至少保留 top-1，让 LLM 最终决定是否采用
+RELEVANCE_THRESHOLD = 0.42
+
 # 查询改写提示词：结合对话历史把模糊查询改写为具体查询
 _REWRITE_PROMPT = """你是查询改写器。结合以下对话历史，把用户的最新提问改写为一个包含完整上下文的独立检索查询。
 
@@ -44,8 +49,8 @@ _REWRITE_PROMPT = """你是查询改写器。结合以下对话历史，把用�
 _RAG_SYSTEM_PROMPT = """你是 NexusAI 知识库问答助手。请基于下面提供的"参考资料"回答用户问题。
 
 规则：
-1. 优先使用参考资料中的内容回答
-2. 如果参考资料不足以回答问题，明确说"根据已有资料无法准确回答，建议补充相关文档"
+1. 你的回答**必须且只能**基于下方"参考资料"中的内容，严禁从对话历史中提取事实性信息作为答案
+2. 如果参考资料不足以回答问题，明确说"根据已有资料无法准确回答，建议补充相关文档"，不要从对话上下文中推测或编造
 3. 不要编造资料中没有的事实
 4. 回答简洁专业，使用中文
 5. 如果资料中有具体段落或来源信息，可以适当标注
@@ -186,10 +191,33 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             ),
         }
 
-    # ---------- 2. 拼装上下文 ----------
+    # ---------- 1.5 软过滤：去掉低相关度 chunk，但至少保留 top-1 ----------
+    original_count = len(retrieved_docs)
+    filtered_docs = [d for d in retrieved_docs if d["score"] <= RELEVANCE_THRESHOLD]
+    if not filtered_docs:
+        # 全部低于阈值，至少保留分数最好的那条，让 LLM 最终决定
+        filtered_docs = [retrieved_docs[0]]
+        logger.info(
+            "[RAG Agent] 软过滤: 全部 {} 条超过阈值 {}, 保留 top-1 (score={})",
+            original_count, RELEVANCE_THRESHOLD, retrieved_docs[0]["score"],
+        )
+    elif len(filtered_docs) < original_count:
+        logger.info(
+            "[RAG Agent] 软过滤: {}/{} 条通过阈值 {} (过滤掉 {} 条低相关度)",
+            len(filtered_docs), original_count, RELEVANCE_THRESHOLD,
+            original_count - len(filtered_docs),
+        )
+    # 用过滤后的结果替换（retrieved_docs 仍保留全部用于前端展示）
+    effective_docs = filtered_docs
+    # 给每条标记是否被采用，便于前端区分展示
+    effective_ids = {d["chunk_id"] for d in effective_docs}
+    for d in retrieved_docs:
+        d["adopted"] = d["chunk_id"] in effective_ids
+
+    # ---------- 2. 拼装上下文（使用软过滤后的 effective_docs） ----------
     # 每段编号 + 来源标注，便于 LLM 引用
     ctx_parts = []
-    for i, d in enumerate(retrieved_docs, 1):
+    for i, d in enumerate(effective_docs, 1):
         src = d["metadata"].get("file_name") or "未知来源"
         header = d["metadata"].get("header_path", "")
         ctx_parts.append(
