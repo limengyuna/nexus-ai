@@ -42,6 +42,7 @@ export interface RetrievedDoc {
   content: string
   score: number
   metadata: Record<string, any>
+  adopted?: boolean  // 是否通过软过滤被 LLM 实际采用
 }
 
 export interface ToolCall {

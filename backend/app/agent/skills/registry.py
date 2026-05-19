@@ -26,6 +26,7 @@ class BaseSkill(ABC):
     description: str = ""
     required_tools: List[str] = []
     trigger_keywords: List[str] = []
+    allow_with_kb: bool = False  # 有 KB 时是否也允许关键词匹配触发
 
     @abstractmethod
     def execute(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -70,14 +71,19 @@ class SkillRegistry:
     def list(self) -> List[BaseSkill]:
         return list(self._skills.values())
 
-    def match_by_keywords(self, user_input: str) -> Optional[BaseSkill]:
+    def match_by_keywords(self, user_input: str, has_kb: bool = False) -> Optional[BaseSkill]:
         """
         关键词预匹配（O(n)）
         让 Router 在调 LLM 之前先用关键词快速判断有没有候选 Skill，
         节省一次不必要的 LLM 调用。
+
+        :param has_kb: 是否绑定了知识库，有 KB 时只匹配 allow_with_kb=True 的 Skill
         """
         lower = user_input.lower()
         for skill in self._skills.values():
+            # 有 KB 时只允许白名单 Skill 通过关键词匹配
+            if has_kb and not skill.allow_with_kb:
+                continue
             if any(kw.lower() in lower for kw in skill.trigger_keywords):
                 return skill
         return None

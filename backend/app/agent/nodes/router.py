@@ -95,11 +95,9 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     has_kb = state.get("kb_id") is not None
 
     # ---------- 阶段 1：关键词预匹配 Skill ----------
-    # 仅在【未绑定知识库】的场景下走捷径；
-    # 一旦会话关联了 KB，必须让 LLM 精确判断，避免"向量数据库"中"数据"被 data_analyst 误命中
-    matched_skill = None
-    if not has_kb:
-        matched_skill = skill_registry.match_by_keywords(user_input)
+    # 无 KB 时所有 Skill 都可匹配；有 KB 时只允许 allow_with_kb=True 的 Skill 匹配
+    # （避免 "向量数据库" 中 "数据" 被 data_analyst 误命中，但允许 "总结" 触发 document_summarizer）
+    matched_skill = skill_registry.match_by_keywords(user_input, has_kb=has_kb)
     if matched_skill is not None:
         intent = ROUTE_TOOL
         reason = f"关键词匹配到技能 [{matched_skill.name}]"

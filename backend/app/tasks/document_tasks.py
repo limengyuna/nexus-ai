@@ -88,7 +88,17 @@ def process_document(self, document_id: int, task_record_id: int) -> dict:
         DocumentService.update_status(db, document_id, DocumentStatus.EMBEDDING)
         embedder = get_embedder()
         contents: List[str] = [c.content for c in chunks]
-        embeddings = embedder.embed_texts(contents)
+
+        # 向量化时拼接 header_path 作为语义增强
+        # 让 embedding 能更好地捕捉 chunk 所属的章节主题
+        embed_texts: List[str] = []
+        for c in chunks:
+            header = c.metadata.get("header_path", "")
+            if header and header != "(no-header)":
+                embed_texts.append(f"[{header}] {c.content}")
+            else:
+                embed_texts.append(c.content)
+        embeddings = embedder.embed_texts(embed_texts)
 
         TaskService.update_progress(db, task_record_id, progress=85)
 

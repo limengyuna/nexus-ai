@@ -68,22 +68,104 @@ def _parse_pdf(file_path: Path) -> str:
 
 
 def _parse_docx(file_path: Path) -> str:
-    """解析 Word .docx 文件，按段落拼接。"""
+    """
+    解析 Word .docx 文件，识别标题样式转为 Markdown 格式。
+
+    改进点：
+    1. 识别 Heading 1/2/3 样式 → 转成 # / ## / ### Markdown 标题
+    2. 过滤目录条目（带页码的 TOC 行，如 "第1章 绪论 1"）
+    3. 过滤摘要/Abstract 前的封面内容（可选）
+    4. 保留表格内容
+    """
+    import re
     from docx import Document as DocxDocument  # python-docx
 
     doc = DocxDocument(str(file_path))
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
 
-    # 表格内容也提取出来
+    # Heading 样式名 → Markdown 标题级别的映射（精确匹配）
+    _HEADING_MAP = {
+        # 英文标准样式
+        "Heading 1": "#",
+        "Heading 2": "##",
+        "Heading 3": "###",
+        "Heading 4": "####",
+        # 中文 Word 模板的标题样式
+        "标题 1": "#",
+        "标题 2": "##",
+        "标题 3": "###",
+        "标题 4": "####",
+        # 毕业论文常见自定义样式
+        "章节 一级标题": "#",
+        "章节 二级标题": "##",
+        "章节 三级标题": "###",
+        "参考文献": "#",
+    }
+
+    # 模糊匹配规则：样式名包含关键词时的兜底映射
+    def _guess_heading_level(style_name: str) -> str:
+        """对不在精确映射表中的样式名，按关键词猜测标题级别"""
+        s = style_name.lower()
+        # 匹配 "heading N" 或 "标题 N" 的变体
+        for keyword, prefix in [("heading 1", "#"), ("heading 2", "##"), ("heading 3", "###"),
+                                ("heading 4", "####"), ("标题1", "#"), ("标题2", "##"),
+                                ("标题3", "###")]:
+            if keyword in s.replace(" ", ""):
+                return prefix
+        # 含有 "title" / "章" / "标题" 但未匹配到具体级别的，视为一级标题
+        if any(kw in s for kw in ("title", "章标题", "chaptertitle")):
+            return "#"
+        return ""
+
+    # 目录条目正则：匹配 "章节编号/标题 + 页码数字" 的模式
+    # 例如 "第1章 绪论 1"、"1.1 设计背景与意义 3"、"参考文献  78"
+    _TOC_PATTERN = re.compile(r"^.{2,30}\s+\d{1,3}\s*$")
+
+    # 是否进入正文区域（跳过目录页）
+    in_toc = False
+    toc_skipped = 0
+    lines: list[str] = []
+
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+
+        style_name = para.style.name if para.style else ""
+
+        # 检测目录区域：连续多行匹配 TOC 模式则视为目录
+        if _TOC_PATTERN.match(text):
+            if not in_toc:
+                in_toc = True
+            toc_skipped += 1
+            continue
+
+        # 离开目录区域
+        if in_toc:
+            in_toc = False
+            if toc_skipped > 3:
+                logger.debug("跳过目录条目 {} 行", toc_skipped)
+
+        # 识别标题样式，转为 Markdown 格式（先精确匹配，再模糊兜底）
+        md_prefix = _HEADING_MAP.get(style_name, "") or _guess_heading_level(style_name)
+        if md_prefix:
+            lines.append(f"{md_prefix} {text}")
+        else:
+            lines.append(text)
+
+    # 表格内容也提取出来（追加到末尾）
     for table in doc.tables:
         for row in table.rows:
             row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
             if row_text:
-                paragraphs.append(row_text)
+                lines.append(row_text)
 
-    if not paragraphs:
+    if not lines:
         raise DocumentParseError(f"Word 文档内容为空: {file_path}")
-    return "\n\n".join(paragraphs)
+
+    result = "\n\n".join(lines)
+    logger.info("docx 解析完成: {} -> {} 字符 (跳过目录 {} 行, 识别标题样式)",
+                file_path.name, len(result), toc_skipped)
+    return result
 
 
 # ---------- 扩展名 → 解析函数 映射 ----------
