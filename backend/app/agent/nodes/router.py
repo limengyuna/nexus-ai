@@ -7,8 +7,8 @@ Router Agent 节点
 - "chitchat": 闲聊或常识问答，不需要 RAG 也不需要工具
 
 决策流程：
-1. 先用 Skill 注册中心的关键词预匹配（极快）
-2. 若无关键词命中，再调 LLM 用 JSON 模式做精确意图分类
+1. 调 LLM（JSON 模式）做意图分类 + 推荐 Skill（recommended_skill）
+2. 若推荐了 Skill 且该 Skill 真实存在，写入 matched_skill 供 Tool Agent 强制执行
 3. 把决策原因记入 route_reason，便于"思考过程"展示
 """
 import json
@@ -34,11 +34,16 @@ _ROUTER_SYSTEM_PROMPT = """你是 NexusAI 平台的意图路由器。把用户�
                ⚠ 涉及实时/时效性信息（当前时间、天气、新闻、股价、赛事比分等）也必须选 "tool"
 3. "chitchat" - 闲聊、问候、一般常识问答（不涉及实时数据的日常对话）
 
-当前可用能力（命中则选 "tool"）：
+当前可用技能/服务（若用户意图明确匹配某个技能，选 "tool" 并在 recommended_skill 写上技能名）：
 {capabilities}
 
 输出严格的 JSON 格式：
-{{"intent": "rag|tool|chitchat", "reason": "简短理由（中文）"}}
+{{"intent": "rag|tool|chitchat", "reason": "简短理由（中文）", "recommended_skill": "技能名或null"}}
+
+规则：
+- recommended_skill 仅在用户明确要求执行某个技能的核心能力时才填写（如用户要求做调研、写邮件、总结文档等动作）
+- 用户只是在对话中附带提及相关词汇但实际意图是其他操作时，不要填
+- 不确定时填 null，让 Tool Agent 自行决策
 
 只输出 JSON，不要其他任何文字。"""
 
@@ -94,26 +99,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     has_kb = state.get("kb_id") is not None
 
-    # ---------- 阶段 1：关键词预匹配 Skill ----------
-    # 无 KB 时所有 Skill 都可匹配；有 KB 时只允许 allow_with_kb=True 的 Skill 匹配
-    # （避免 "向量数据库" 中 "数据" 被 data_analyst 误命中，但允许 "总结" 触发 document_summarizer）
-    matched_skill = skill_registry.match_by_keywords(user_input, has_kb=has_kb)
-    if matched_skill is not None:
-        intent = ROUTE_TOOL
-        reason = f"关键词匹配到技能 [{matched_skill.name}]"
-        logger.info("[Router] 关键词命中 → {} (skill={})", intent, matched_skill.name)
-        return {
-            "intent": intent,
-            "route_reason": reason,
-            "matched_skill": matched_skill.name,  # 传给 Tool Agent，强制执行该 Skill
-            "execution_trace": append_trace(
-                state, "router", started_at,
-                input_summary={"user_input": user_input[:80]},
-                output_summary={"intent": intent, "matched_skill": matched_skill.name},
-            ),
-        }
-
-    # ---------- 阶段 2：LLM 精确分类 ----------
+    # ---------- LLM 意图分类（同时推荐 Skill） ----------
     capabilities = _build_capabilities_brief(state.get("user_id"))
     system_prompt = _ROUTER_SYSTEM_PROMPT.format(capabilities=capabilities)
 
@@ -126,6 +112,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     llm = get_llm_fast()
     intent = ROUTE_CHITCHAT
     reason = ""
+    recommended_skill = None
     node_tokens = 0
     # DeepSeek Flash 偶尔返回空内容，重试一次提高稳定性
     for attempt in range(2):
@@ -143,6 +130,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
             parsed = json.loads(raw)
             intent = parsed.get("intent", ROUTE_CHITCHAT).lower()
             reason = parsed.get("reason", "")
+            recommended_skill = parsed.get("recommended_skill") or None
             break  # 解析成功，跳出重试
         except (json.JSONDecodeError, Exception) as e:
             logger.warning("[Router] LLM 路由失败（第 {} 次）: {}", attempt + 1, e)
@@ -162,15 +150,28 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         logger.warning("[Router] 收到未知 intent: {}, 降级到 chitchat", intent)
         intent = ROUTE_CHITCHAT
 
-    logger.info("[Router] LLM 决策 → {} | 理由: {}", intent, reason)
+    # 验证 recommended_skill 是否真实存在
+    matched_skill_name = None
+    if intent == ROUTE_TOOL and recommended_skill:
+        from app.agent.skills import get_skill
+        if get_skill(recommended_skill) is not None:
+            matched_skill_name = recommended_skill
+            logger.info("[Router] LLM 推荐 Skill: {}", recommended_skill)
+        else:
+            logger.warning("[Router] LLM 推荐的 Skill '{}' 不存在，忽略", recommended_skill)
 
-    return {
+    logger.info("[Router] LLM 决策 → {} | 理由: {} | skill: {}", intent, reason, matched_skill_name)
+
+    result = {
         "intent": intent,
         "route_reason": reason,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "router", started_at,
             input_summary={"user_input": user_input[:80], "has_kb": has_kb},
-            output_summary={"intent": intent, "reason": reason, "tokens": node_tokens},
+            output_summary={"intent": intent, "reason": reason, "skill": matched_skill_name, "tokens": node_tokens},
         ),
     }
+    if matched_skill_name:
+        result["matched_skill"] = matched_skill_name
+    return result

@@ -38,6 +38,30 @@ _SUMMARY_PROMPT = """你是对话摘要器。请把下面这段历史对话压�
 请输出新的摘要，不要包含其他任何文字。"""
 
 
+def _format_msg_for_context(m: ChatMessage) -> str:
+    """
+    格式化单条消息用于跨轮上下文拼接。
+    对 assistant 消息，附加工具调用摘要（成功/失败），
+    确保后续轮次 LLM 能感知之前的工具调用过程。
+    """
+    base = f"[{m.role.value}] {m.content[:200]}"
+    if m.role.value == "assistant" and m.tool_calls_json:
+        calls = m.tool_calls_json if isinstance(m.tool_calls_json, list) else []
+        if not calls:
+            return base
+        error_calls = [c for c in calls if c.get("error")]
+        success_names = [c.get("name", "?") for c in calls if not c.get("error")]
+        parts = []
+        if success_names:
+            parts.append(f"成功调用: {', '.join(success_names[:5])}")
+        for c in error_calls[:3]:
+            err_msg = str(c.get("error", ""))[:80]
+            parts.append(f"调用 {c.get('name','?')} 失败: {err_msg}")
+        if parts:
+            base += f"\n  [工具记录] {'; '.join(parts)}"
+    return base
+
+
 class ChatService:
     """对话业务方法集合"""
 
@@ -211,7 +235,7 @@ class ChatService:
         history_msgs = recent_msgs[:-1] if recent_msgs else []
         if history_msgs:
             recent_text = "\n".join(
-                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-8:]
+                _format_msg_for_context(m) for m in history_msgs[-8:]
             )
             if effective_summary:
                 effective_summary += f"\n\n最近对话记录：\n{recent_text}"
@@ -285,6 +309,19 @@ class ChatService:
             except Exception as e:
                 logger.error("[Memory Integration] 异步触发工具错误事实提取失败: {}", e)
 
+        # 触发 L2 记忆：每轮即时抽取高价值事实（用户身份、明确指令、纠正反馈等）
+        try:
+            from app.memory.tasks import start_async_extract_turn_facts
+            start_async_extract_turn_facts(
+                user_id=session.user_id,
+                session_id=session.id,
+                user_input=user_input,
+                assistant_answer=answer,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
+
         return assistant_msg, final_state
 
     # ---------- 流式版本（SSE）----------
@@ -336,7 +373,7 @@ class ChatService:
         history_msgs = recent_msgs[:-1] if recent_msgs else []
         if history_msgs:
             recent_text = "\n".join(
-                f"[{m.role.value}] {m.content[:200]}" for m in history_msgs[-8:]
+                _format_msg_for_context(m) for m in history_msgs[-8:]
             )
             if effective_summary:
                 effective_summary += f"\n\n最近对话记录：\n{recent_text}"
@@ -452,6 +489,19 @@ class ChatService:
                 )
             except Exception as e:
                 logger.error("[Memory Integration] 异步触发工具错误事实提取失败: {}", e)
+
+        # 触发 L2 记忆：每轮即时抽取高价值事实（用户身份、明确指令、纠正反馈等）
+        try:
+            from app.memory.tasks import start_async_extract_turn_facts
+            start_async_extract_turn_facts(
+                user_id=session.user_id,
+                session_id=session.id,
+                user_input=user_input,
+                assistant_answer=answer,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
 
         # ---------- 7. 发送 done + 完整元数据 ----------
         execution_trace = json.loads(

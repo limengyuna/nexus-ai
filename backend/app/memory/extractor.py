@@ -37,14 +37,44 @@ _ERROR_EXTRACT_PROMPT = """你是一个智能记忆抽取器。请根据以下�
   ]
 }}"""
 
-_BATCH_EXTRACT_PROMPT = """你是一个智能记忆抽取器。请分析下面这段即将归档的历史对话，从中提取出对未来有长期指导价值的“记忆事实（Facts）”。
+_TURN_EXTRACT_PROMPT = """你是一个智能记忆抽取器。请分析下面这段单轮对话，仅提取具有长期复用价值的高价值信息。
+
+可提取的类型：
+1. 用户个人信息或持久性偏好 → fact_type: "preference"
+2. 用户对 AI 错误认知的纠正 → fact_type: "knowledge"
+
+判断标准：该信息在未来的对话中是否仍然有用？如果只对当前这一次操作有意义，则不提取。
+
+不要提取一次性的操作请求、具体的查询内容、临时性细节或日常寒暄。
+大多数普通对话不包含高价值信息，此时请返回空数组。
+
+待分析的对话：
+{history_text}
+
+必须输出如下格式的 JSON：
+{{
+  "facts": [
+    {{
+      "content": "事实内容",
+      "fact_type": "preference|knowledge",
+      "importance": 0.9
+    }}
+  ]
+}}"""
+
+_BATCH_EXTRACT_PROMPT = """你是一个智能记忆抽取器。请分析下面这段历史对话，从中提取出对未来有长期指导价值的"记忆事实（Facts）"。
 
 你需要关注的事实类型包括：
-1. "env_constraint"（环境约束）：如操作系统、特定目录路径、API限制等，例如：“用户的电脑是 Windows 系统，需提供 Powershell 兼容脚本。”
-2. "preference"（用户偏好）：如用户喜欢的编程语言、交互风格等，例如：“用户更喜欢使用 Python 编写自动化脚本。”
-3. "knowledge"（长期知识）：用户分享的或共同确认的关键业务事实或固定逻辑，例如：“本项目的服务端部署在 8000 端口，前端部署在 5173 端口。”
+1. "env_constraint"（环境约束）：如操作系统、特定目录路径、API限制等，例如："用户的电脑是 Windows 系统，需提供 Powershell 兼容脚本。"
+2. "preference"（用户偏好）：如用户喜欢的编程语言、交互风格等，例如："用户更喜欢使用 Python 编写自动化脚本。"
+3. "knowledge"（长期知识）：用户分享的或共同确认的关键业务事实或固定逻辑，例如："本项目的服务端部署在 8000 端口，前端部署在 5173 端口。"
 
-不要提取无意义、临时性或日常问候的信息（如“用户说了你好”）。
+⚠ 以下高价值信息必须优先抽取（importance ≥ 0.85）：
+- 用户身份信息（名字、职业、年龄等）→ 归为 "preference"
+- 明确指令（用户要求 AI 以后如何行为）→ 归为 "preference"
+- 纠正反馈（用户纠正了 AI 的错误认知）→ 归为 "knowledge"
+
+不要提取纯粹的寒暄（如"你好"、"谢谢"）或无长期价值的临时性信息。
 如果这段对话没有包含任何有长期保存价值的事实，请返回空数组。
 
 待分析的历史对话：
@@ -53,7 +83,7 @@ _BATCH_EXTRACT_PROMPT = """你是一个智能记忆抽取器。请分析下面�
 请返回提炼后的 facts 数组。
 要求：
 1. 每条事实内容必须简洁、准确，具有长效指导意义（不超过 100 字）。
-2. 重要性评分（importance）根据事实的价值设定在 0.4 到 0.9 之间。
+2. 重要性评分（importance）：高价值信息（身份/指令/纠正）设为 0.85-0.95，一般事实设为 0.4-0.8。
 
 必须输出如下格式的 JSON，不要包含任何其他多余文本：
 {{
@@ -113,6 +143,40 @@ class MemoryExtractor:
             return facts
         except Exception as e:
             logger.exception("[Memory Extractor] 提取工具错误教训时失败: {}", e)
+            return []
+
+    @staticmethod
+    def extract_from_turn(user_input: str, assistant_answer: str) -> List[Dict[str, Any]]:
+        """
+        从单轮对话中即时抽取高价值事实（轻量版，不依赖 ORM 对象）。
+
+        每轮对话结束后异步调用，确保用户身份、明确指令、纠正反馈等
+        高价值信息能立即存入 L2 长期记忆，无需等待摘要压缩。
+
+        :param user_input: 用户本轮输入
+        :param assistant_answer: AI 本轮回复
+        :return: 抽取的记忆 facts 列表
+        """
+        if not user_input:
+            return []
+
+        history_text = f"[用户] {user_input}\n[AI助手] {assistant_answer[:300]}"
+        prompt = _TURN_EXTRACT_PROMPT.format(history_text=history_text)
+
+        try:
+            llm = get_llm_fast()
+            response = llm.complete(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=400
+            )
+            data = json.loads(response)
+            facts = data.get("facts", [])
+            logger.info("[Memory Extractor] 从当前轮对话即时抽取出 {} 条事实", len(facts))
+            return facts
+        except Exception as e:
+            logger.exception("[Memory Extractor] 即时抽取事实失败: {}", e)
             return []
 
     @staticmethod

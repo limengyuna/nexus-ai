@@ -155,3 +155,75 @@ def start_async_extract_batch_facts(
         daemon=True
     )
     thread.start()
+
+
+def _extract_turn_facts_worker(
+    user_id: int,
+    session_id: int,
+    user_input: str,
+    assistant_answer: str,
+    kb_id: int | None = None
+) -> None:
+    """每轮对话即时事实抽取的子线程执行逻辑"""
+    logger.info("[Memory Tasks] 开始即时抽取当前轮事实... (user_id={}, session_id={})", user_id, session_id)
+    db = SessionLocal()
+    try:
+        extracted_facts = MemoryExtractor.extract_from_turn(user_input, assistant_answer)
+        if not extracted_facts:
+            logger.debug("[Memory Tasks] 当前轮无可抽取的高价值事实")
+            return
+
+        saved_count = 0
+        for fact_dict in extracted_facts:
+            try:
+                # preference 类型为全局记忆，不绑定 kb_id
+                fact_kb_id = None if fact_dict["fact_type"] == "preference" else kb_id
+                MemoryStore.save_fact(
+                    db=db,
+                    user_id=user_id,
+                    content=fact_dict["content"],
+                    fact_type=fact_dict["fact_type"],
+                    importance=fact_dict["importance"],
+                    session_id=session_id,
+                    kb_id=fact_kb_id
+                )
+                saved_count += 1
+            except Exception as e:
+                logger.error("[Memory Tasks] 保存即时事实失败: {}", e)
+
+        logger.info("[Memory Tasks] 即时事实抽取完毕，保存 {}/{} 条", saved_count, len(extracted_facts))
+    except Exception as e:
+        logger.exception("[Memory Tasks] 即时事实抽取任务失败: {}", e)
+    finally:
+        db.close()
+
+
+def start_async_extract_turn_facts(
+    user_id: int,
+    session_id: int,
+    user_input: str,
+    assistant_answer: str,
+    kb_id: int | None = None
+) -> None:
+    """
+    触发异步任务：从当前轮对话中即时抽取高价值事实
+
+    每轮对话结束后调用，确保用户身份、明确指令、纠正反馈等
+    关键信息能立即持久化到 L2，无需等待摘要压缩触发。
+    依赖 MemoryStore.save_fact 的语义去重机制避免重复。
+
+    :param user_id: 用户 ID
+    :param session_id: 来源会话 ID
+    :param user_input: 用户本轮输入
+    :param assistant_answer: AI 本轮回复
+    :param kb_id: 关联知识库 ID
+    """
+    if not user_input:
+        return
+
+    thread = threading.Thread(
+        target=_extract_turn_facts_worker,
+        args=(user_id, session_id, user_input, assistant_answer, kb_id),
+        daemon=True
+    )
+    thread.start()
