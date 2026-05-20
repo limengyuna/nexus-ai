@@ -12,6 +12,7 @@ from app.models.document import Document, DocumentStatus
 from app.models.chat import ChatSession, ChatMessage, MessageRole, AgentSource
 from app.models.task import TaskRecord, TaskStatus, TaskType
 from app.models.mcp_server import MCPServerConfig, MCPTransportType
+from app.models.memory import MemoryFact, MemoryFactType
 
 __all__ = [
     # Mixin
@@ -30,6 +31,9 @@ __all__ = [
     "ChatMessage",
     "MessageRole",
     "AgentSource",
+    # 记忆事实
+    "MemoryFact",
+    "MemoryFactType",
     # 异步任务
     "TaskRecord",
     "TaskStatus",

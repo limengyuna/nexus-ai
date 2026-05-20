@@ -35,6 +35,14 @@ class RetrievedDoc(TypedDict, total=False):
     adopted: bool  # 是否通过软过滤被 LLM 实际采用
 
 
+class RetrievedMemory(TypedDict, total=False):
+    """L2 检索出来的单条事实"""
+    id: int
+    content: str
+    fact_type: str
+    importance: float
+
+
 class ToolCallRecord(TypedDict, total=False):
     """工具/Skill 调用记录"""
     name: str                    # 工具或技能名
@@ -66,6 +74,9 @@ class AgentState(TypedDict, total=False):
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果
+
+    # ---------- L2 Memory 事实库 ----------
+    retrieved_memories: List[RetrievedMemory]   # 检索到的历史事实记忆
 
     # ---------- Tool / Skill ----------
     tool_calls: List[ToolCallRecord]           # 本轮所有工具/技能调用记录
@@ -104,6 +115,7 @@ def make_initial_state(
         intent="",
         route_reason="",
         retrieved_docs=[],
+        retrieved_memories=[],
         tool_calls=[],
         skill_used=None,
         final_answer="",

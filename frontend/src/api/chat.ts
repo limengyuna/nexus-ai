@@ -25,6 +25,7 @@ export interface ChatMessage {
   agent_source: AgentSource | null
   tool_calls_json: any
   token_usage: number | null
+  is_archived?: boolean
   created_at: string
 }
 
@@ -52,6 +53,13 @@ export interface ToolCall {
   result: any
 }
 
+export interface RetrievedMemory {
+  id: number
+  content: string
+  fact_type: string
+  importance: number
+}
+
 export interface ChatResponse {
   message: ChatMessage
   intent: string
@@ -59,6 +67,7 @@ export interface ChatResponse {
   skill_used: string | null
   tool_calls: ToolCall[]
   retrieved_docs: RetrievedDoc[]
+  retrieved_memories: RetrievedMemory[]
   execution_trace: TraceStep[]
 }
 
@@ -103,6 +112,7 @@ export interface StreamHandlers {
     tool_calls: ToolCall[]
     execution_trace: TraceStep[]
     retrieved_docs: RetrievedDoc[]
+    retrieved_memories: RetrievedMemory[]
     token_usage: number
     agent_source: string
   }) => void

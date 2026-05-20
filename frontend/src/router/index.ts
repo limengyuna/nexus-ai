@@ -48,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/MCPView.vue'),
         meta: { title: 'MCP 配置' },
       },
+      {
+        path: 'memory',
+        name: 'memory',
+        component: () => import('@/views/MemoryView.vue'),
+        meta: { title: '长期记忆' },
+      },
     ],
   },
   // 404 页面：放在最后，匹配所有未命中的路径

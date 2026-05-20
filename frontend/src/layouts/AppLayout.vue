@@ -4,7 +4,7 @@
  */
 import { onMounted, markRaw, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
-import { Library, MessageSquare, Moon, Plug, Sparkles, Sun, type LucideIcon } from 'lucide-vue-next'
+import { Brain, Library, MessageSquare, Moon, Plug, Sparkles, Sun, type LucideIcon } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
   { to: '/knowledge', label: '知识库', icon: markRaw(Library) },
   { to: '/skills', label: 'Skills', icon: markRaw(Sparkles) },
   { to: '/mcp', label: 'MCP 配置', icon: markRaw(Plug) },
+  { to: '/memory', label: '长期记忆', icon: markRaw(Brain) },
 ]
 </script>
 

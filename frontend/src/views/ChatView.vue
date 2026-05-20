@@ -38,6 +38,49 @@ const sessionTotalTokens = computed(() => {
     .reduce((sum, m) => sum + (m.token_usage || 0), 0)
 })
 
+// 估算当前活动（未归档）上下文窗口占用的 Token 数
+const currentContextTokens = computed(() => {
+  if (!chat.activeSessionId) return 0
+  
+  // 1. 系统基础提示词、时间、角色标签等开销 (约 100 tokens)
+  let total = 100
+  
+  // 2. 注入历史摘要 (如已触发对话压缩)
+  if (chat.activeSession?.summary) {
+    total += Math.ceil(chat.activeSession.summary.length * 0.6)
+  }
+  
+  // 3. L2 语义事实记忆注入（context_prep 从 ChromaDB 检索并以 system 消息注入）
+  if (chat.lastRetrievedMemories && chat.lastRetrievedMemories.length > 0) {
+    // 固定引导文本开销（约 40 tokens）
+    total += 40
+    for (const mem of chat.lastRetrievedMemories) {
+      total += Math.ceil(mem.content.length * 0.6) + 10
+    }
+  }
+
+  // 4. 注入未归档的活动消息
+  const activeMessages = chat.messages.filter((m) => !m.is_archived)
+  for (const m of activeMessages) {
+    // 消息内容估算
+    total += Math.ceil(m.content.length * 0.6)
+    // 注入工具调用的结果数据估算
+    if (m.tool_calls_json) {
+      total += Math.ceil(JSON.stringify(m.tool_calls_json).length * 0.3)
+    }
+    // 基础消息包裹头
+    total += 20
+  }
+  
+  return total
+})
+
+// 模型单次上下文额度上限（以标准的 DeepSeek-V4 1M 极致上下文窗口为基准）
+const contextLimit = 1000000
+const currentContextPercent = computed(() => {
+  return Math.min(Math.round((currentContextTokens.value / contextLimit) * 100), 100)
+})
+
 function formatTokens(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
   return String(n)
@@ -486,7 +529,25 @@ function onKeyDown(e: KeyboardEvent) {
       </div>
 
       <!-- 输入区 -->
-      <div class="border-t border-gray-200 dark:border-gray-800 p-4 flex-shrink-0">
+      <div class="border-t border-gray-200 dark:border-gray-800 p-4 flex-shrink-0 bg-gray-50/30 dark:bg-gray-900/10">
+        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格) -->
+        <div v-if="chat.activeSessionId" class="flex items-center justify-between text-[11px] mb-2 text-gray-500 dark:text-gray-400 select-none px-1">
+          <div class="flex items-center gap-1.5">
+            <Zap :size="11" class="text-amber-500 flex-shrink-0" :class="chat.sending ? 'animate-pulse' : ''" />
+            <span class="font-medium">活动上下文窗口已用：</span>
+            <span class="font-semibold" :class="currentContextTokens > 800000 ? 'text-red-500 animate-pulse' : currentContextTokens > 500000 ? 'text-amber-500 font-semibold' : 'text-primary-600 dark:text-primary-400'">
+              {{ currentContextPercent }}% ({{ formatTokens(currentContextTokens) }} / 1M)
+            </span>
+          </div>
+          <!-- 极客风细条进度槽 -->
+          <div class="w-32 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden flex-shrink-0 ml-2">
+            <div
+              class="h-full rounded-full transition-all duration-500"
+              :class="currentContextPercent > 80 ? 'bg-red-500' : currentContextPercent > 50 ? 'bg-amber-500' : 'bg-primary-500'"
+              :style="{ width: `${currentContextPercent}%` }"
+            ></div>
+          </div>
+        </div>
         <div class="flex gap-2">
           <textarea
             v-model="inputText"

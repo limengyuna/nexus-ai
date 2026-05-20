@@ -45,6 +45,7 @@ class ChatMessageOut(BaseModel):
     agent_source: Optional[AgentSource]
     tool_calls_json: Optional[Any]
     token_usage: Optional[int]
+    is_archived: bool = False
     created_at: datetime
 
 

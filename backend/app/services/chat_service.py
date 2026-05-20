@@ -156,6 +156,19 @@ class ChatService:
         for m in to_compress:
             m.is_archived = True
         db.commit()
+
+        # 触发 L2 记忆：异步批量提取这批归档消息中的长效事实与用户偏好
+        try:
+            from app.memory.tasks import start_async_extract_batch_facts
+            start_async_extract_batch_facts(
+                user_id=session.user_id,
+                session_id=session.id,
+                messages=to_compress,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] 异步触发批量事实提取失败: {}", e)
+
         logger.info(
             "[Memory] 会话 {} 摘要压缩：归档 {} 条旧消息，新摘要长度 {}",
             session.id, len(to_compress), len(new_summary),
@@ -255,6 +268,22 @@ class ChatService:
 
         db.commit()
         db.refresh(assistant_msg)
+
+        # 触发 L2 记忆：检查是否有工具调用发生错误，若有则触发后台异步提取教训
+        tool_calls = final_state.get("tool_calls", [])
+        error_calls = [tc for tc in tool_calls if tc.get("error")]
+        if error_calls:
+            try:
+                from app.memory.tasks import start_async_extract_error_facts
+                start_async_extract_error_facts(
+                    user_id=session.user_id,
+                    session_id=session.id,
+                    user_input=user_input,
+                    error_calls=error_calls,
+                    kb_id=session.kb_id
+                )
+            except Exception as e:
+                logger.error("[Memory Integration] 异步触发工具错误事实提取失败: {}", e)
 
         return assistant_msg, final_state
 
@@ -408,12 +437,31 @@ class ChatService:
         db.commit()
         db.refresh(assistant_msg)
 
+        # 触发 L2 记忆：检查是否有工具调用发生错误，若有则触发后台异步提取教训
+        tool_calls = final_state.get("tool_calls", [])
+        error_calls = [tc for tc in tool_calls if tc.get("error")]
+        if error_calls:
+            try:
+                from app.memory.tasks import start_async_extract_error_facts
+                start_async_extract_error_facts(
+                    user_id=session.user_id,
+                    session_id=session.id,
+                    user_input=user_input,
+                    error_calls=error_calls,
+                    kb_id=session.kb_id
+                )
+            except Exception as e:
+                logger.error("[Memory Integration] 异步触发工具错误事实提取失败: {}", e)
+
         # ---------- 7. 发送 done + 完整元数据 ----------
         execution_trace = json.loads(
             json.dumps(final_state.get("execution_trace", []), default=str)
         )
         retrieved_docs = json.loads(
             json.dumps(final_state.get("retrieved_docs", []), default=str)
+        )
+        retrieved_memories = json.loads(
+            json.dumps(final_state.get("retrieved_memories", []), default=str)
         )
         yield (
             "done",
@@ -423,6 +471,7 @@ class ChatService:
                 "tool_calls": tool_calls_payload or [],
                 "execution_trace": execution_trace,
                 "retrieved_docs": retrieved_docs,
+                "retrieved_memories": retrieved_memories,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
                 "agent_source": src.value if hasattr(src, "value") else str(src),
             },

@@ -11,6 +11,7 @@ import type {
   ChatResponse,
   ChatSession,
   RetrievedDoc,
+  RetrievedMemory,
   ToolCall,
   TraceStep,
 } from '@/api/chat'
@@ -27,6 +28,7 @@ function saveThinkingTrace(
     execution_trace: TraceStep[]
     tool_calls: ToolCall[]
     retrieved_docs: RetrievedDoc[]
+    retrieved_memories?: RetrievedMemory[]
   }
 ) {
   try {
@@ -53,6 +55,7 @@ function saveThinkingTrace(
       trace: data.execution_trace,
       toolCalls: data.tool_calls,
       retrievedDocs: data.retrieved_docs,
+      retrievedMemories: data.retrieved_memories || [],
       timestamp: Date.now()
     }
 
@@ -98,6 +101,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastTrace = ref<TraceStep[]>([])
   const lastToolCalls = ref<ToolCall[]>([])
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
+  const lastRetrievedMemories = ref<RetrievedMemory[]>([])
   const activeThinkingMessageId = ref<number | null>(null)
 
   // ---------- 计算属性 ----------
@@ -132,6 +136,7 @@ export const useChatStore = defineStore('chat', () => {
         lastTrace.value = snapshot.trace || []
         lastToolCalls.value = snapshot.toolCalls || []
         lastRetrievedDocs.value = snapshot.retrievedDocs || []
+        lastRetrievedMemories.value = snapshot.retrievedMemories || []
         activeThinkingMessageId.value = snapshot.messageId
       } else {
         clearTrace()
@@ -157,6 +162,7 @@ export const useChatStore = defineStore('chat', () => {
           lastTrace.value = snapshot.trace || []
           lastToolCalls.value = snapshot.toolCalls || []
           lastRetrievedDocs.value = snapshot.retrievedDocs || []
+          lastRetrievedMemories.value = snapshot.retrievedMemories || []
           activeThinkingMessageId.value = snapshot.messageId
         }
       }
@@ -252,6 +258,7 @@ export const useChatStore = defineStore('chat', () => {
       lastTrace.value = resp.execution_trace
       lastToolCalls.value = resp.tool_calls
       lastRetrievedDocs.value = resp.retrieved_docs
+      lastRetrievedMemories.value = resp.retrieved_memories || []
 
       // 保存最新思考快照到 LocalStorage
       const assistantMsg = messages.value.find((m) => m.role === 'assistant' && m.id > 0)
@@ -263,6 +270,7 @@ export const useChatStore = defineStore('chat', () => {
         execution_trace: resp.execution_trace,
         tool_calls: resp.tool_calls,
         retrieved_docs: resp.retrieved_docs,
+        retrieved_memories: resp.retrieved_memories,
       })
 
       // 会话标题可能被后端更新（首次发消息时）
@@ -342,6 +350,7 @@ export const useChatStore = defineStore('chat', () => {
           lastTrace.value = data.execution_trace
           lastToolCalls.value = data.tool_calls
           lastRetrievedDocs.value = data.retrieved_docs
+          lastRetrievedMemories.value = data.retrieved_memories || []
 
           // 保存思考过程到 LocalStorage
           if (activeSessionId.value) {
@@ -352,6 +361,7 @@ export const useChatStore = defineStore('chat', () => {
               execution_trace: data.execution_trace,
               tool_calls: data.tool_calls,
               retrieved_docs: data.retrieved_docs,
+              retrieved_memories: data.retrieved_memories,
             })
           }
 
@@ -380,6 +390,7 @@ export const useChatStore = defineStore('chat', () => {
     lastTrace.value = []
     lastToolCalls.value = []
     lastRetrievedDocs.value = []
+    lastRetrievedMemories.value = []
     activeThinkingMessageId.value = null
   }
 
@@ -396,6 +407,7 @@ export const useChatStore = defineStore('chat', () => {
     lastTrace,
     lastToolCalls,
     lastRetrievedDocs,
+    lastRetrievedMemories,
     activeThinkingMessageId,
     fetchSessions,
     selectSession,
