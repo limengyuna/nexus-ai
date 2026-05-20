@@ -120,8 +120,86 @@ def _invoke_mcp_tool(config_id: int, original_name: str, arguments: Dict[str, An
         return {"error": str(e)}
 
 
+def _execute_matched_skill(state: AgentState, started_at: float) -> Optional[Dict[str, Any]]:
+    """
+    若 Router 已关键词匹配到 Skill，直接执行该 Skill，跳过 LLM 选工具环节。
+    返回 None 表示无匹配，走正常 function calling 流程。
+    """
+    matched_skill_name = state.get("matched_skill")
+    if not matched_skill_name:
+        return None
+
+    skill_obj = get_skill(matched_skill_name)
+    if skill_obj is None:
+        logger.warning("[Tool Agent] Router 匹配的 Skill '{}' 不存在，降级到 FC 流程", matched_skill_name)
+        return None
+
+    user_input = state.get("user_input", "")
+    token_queue = state.get("_token_queue")
+    context_messages = state.get("context_messages", [])
+
+    # 流式模式：推送 Router 决策
+    if token_queue:
+        token_queue.put(("meta", {
+            "intent": state.get("intent", ""),
+            "route_reason": state.get("route_reason", ""),
+            "skill_used": matched_skill_name,
+        }))
+
+    logger.info("[Tool Agent] Router 已匹配 Skill '{}'，直接执行（跳过 FC）", matched_skill_name)
+
+    # 执行 Skill
+    skill_context = {
+        "kb_id": state.get("kb_id"),
+        "context_messages": context_messages,
+    }
+    try:
+        skill_result = skill_obj.execute(user_input, context=skill_context)
+    except Exception as e:
+        logger.exception("[Tool Agent] 强制执行 Skill '{}' 失败", matched_skill_name)
+        # 降级：返回 None，走正常 FC 流程
+        return None
+
+    answer = skill_result.get("answer", "")
+    tool_call_records: List[ToolCallRecord] = []
+    for stc in skill_result.get("tool_calls", []):
+        tool_call_records.append(ToolCallRecord(
+            name=stc["name"],
+            kind=stc.get("kind", "tool"),
+            arguments=stc.get("arguments", {}),
+            result=stc.get("result"),
+        ))
+
+    # 流式模式：推送答案 + 结束信号
+    if token_queue:
+        if answer:
+            token_queue.put(("chunk", answer))
+        token_queue.put(("done", None))
+
+    return {
+        "skill_used": matched_skill_name,
+        "tool_calls": tool_call_records,
+        "final_answer": answer,
+        "total_tokens": state.get("total_tokens", 0),
+        "execution_trace": append_trace(
+            state, "tool_agent", started_at,
+            input_summary={"user_input": user_input[:60], "match": f"forced_skill:{matched_skill_name}"},
+            output_summary={
+                "tool_call_count": len(tool_call_records),
+                "skill_used": matched_skill_name,
+                "answer_preview": answer[:80],
+            },
+        ),
+    }
+
+
 def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, Any]:
     """LLM Function Calling 主循环（最多 3 轮，避免死循环）"""
+    # 优先检查：Router 已关键词匹配到 Skill，直接执行
+    forced_result = _execute_matched_skill(state, started_at)
+    if forced_result is not None:
+        return forced_result
+
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
     token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）

@@ -71,6 +71,7 @@ class AgentState(TypedDict, total=False):
     # ---------- Router 决策 ----------
     intent: str                                # 意图标签：rag / tool / chitchat
     route_reason: str                          # Router 的推理说明（可选，便于追踪）
+    matched_skill: Optional[str]               # Router 关键词预匹配到的 Skill 名称（强制执行）
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果

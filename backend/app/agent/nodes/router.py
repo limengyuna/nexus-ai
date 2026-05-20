@@ -105,6 +105,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         return {
             "intent": intent,
             "route_reason": reason,
+            "matched_skill": matched_skill.name,  # 传给 Tool Agent，强制执行该 Skill
             "execution_trace": append_trace(
                 state, "router", started_at,
                 input_summary={"user_input": user_input[:80]},
