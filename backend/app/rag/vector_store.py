@@ -219,11 +219,35 @@ class ChromaVectorStore(BaseVectorStore):
 
         import re
         import math
+        import jieba
 
-        # 简易中英文混合分词器：保留汉字单字、连续英文单词和数字
+        # 中文停用词表（高频无意义字词，避免 BM25 噪音匹配）
+        _STOPWORDS = frozenset(
+            "的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 "
+            "自己 这 他 她 它 们 那 被 从 把 让 用 但 而 可以 这个 这些 那个 那些 什么 怎么 "
+            "如何 为什么 吗 呢 吧 啊 哦 嗯 哈 之 其 或 与 及 等 个 各 为 于 对 中 以 下 里 "
+            "面 里面 上面 下面 前 后 左 右 大 小 多 少 来 去 过 做 想 能 会 应该 可能 "
+            "请 帮 我们 你们 他们 她们 它们 这里 那里 一下 一些 时候".split()
+        )
+
+        # jieba 中英文混合分词器 + 停用词过滤
         def tokenize(text: str) -> List[str]:
-            pattern = re.compile(r"[\u4e00-\u9fa5]|[a-zA-Z0-9]+")
-            return pattern.findall(text.lower())
+            tokens = []
+            for word in jieba.cut(text):
+                word = word.strip().lower()
+                if not word:
+                    continue
+                # 过滤纯标点和空白
+                if re.fullmatch(r'[\s\W]+', word):
+                    continue
+                # 过滤停用词
+                if word in _STOPWORDS:
+                    continue
+                # 过滤单个汉字（区分度太低，保留英文/数字单字符如 "A"、"5"）
+                if len(word) == 1 and '\u4e00' <= word <= '\u9fa5':
+                    continue
+                tokens.append(word)
+            return tokens
 
         query_tokens = tokenize(query)
         if not query_tokens:

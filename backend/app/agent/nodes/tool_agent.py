@@ -195,18 +195,21 @@ def _execute_matched_skill(state: AgentState, started_at: float) -> Optional[Dic
 
 def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, Any]:
     """LLM Function Calling 主循环（最多 3 轮，避免死循环）"""
-    # 优先检查：Router 已关键词匹配到 Skill，直接执行
-    forced_result = _execute_matched_skill(state, started_at)
-    if forced_result is not None:
-        return forced_result
+    is_post_action = state.get("needs_post_action", False)
+
+    # 优先检查：Router 已关键词匹配到 Skill，直接执行（后续操作模式下跳过，避免走 Skill 而不是 MCP 工具）
+    if not is_post_action:
+        forced_result = _execute_matched_skill(state, started_at)
+        if forced_result is not None:
+            return forced_result
 
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
     token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
     llm = get_llm()
 
-    # 流式模式：先推送 Router 决策，让前端立即展示
-    if token_queue:
+    # 流式模式：推送 Router 决策（后续操作模式下跳过，RAG Agent 已推送过）
+    if token_queue and not is_post_action:
         token_queue.put(("meta", {
             "intent": state.get("intent", ""),
             "route_reason": state.get("route_reason", ""),
@@ -254,6 +257,23 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
         *context_messages,
     ]
+
+    # 有环图：后续操作模式下，注入 RAG 回答作为上下文，让 LLM 知道已有内容
+    rag_answer_for_combine = ""
+    if is_post_action:
+        rag_answer = state.get("final_answer", "")
+        rag_answer_for_combine = rag_answer
+        if rag_answer:
+            messages.append({
+                "role": "assistant",
+                "content": f"我已经从知识库中检索到以下内容：\n\n{rag_answer}",
+            })
+            messages.append({
+                "role": "user",
+                "content": "请根据上面检索到的内容，完成我之前要求的后续操作（如写入文件、保存、发送等）。只需要执行操作并报告结果，不需要重复上面的内容。",
+            })
+        logger.info("[Tool Agent] 后续操作模式：注入 RAG 回答 ({} 字符) 作为上下文", len(rag_answer))
+
     tool_call_records: List[ToolCallRecord] = []
     skill_used: Optional[str] = None
     final_answer = ""
@@ -417,19 +437,26 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
     _push_answer_and_done()
 
+    # 有环图：后续操作模式下，合并 RAG 回答 + Tool 操作结果为最终回答
+    combined_answer = final_answer
+    if is_post_action and rag_answer_for_combine:
+        combined_answer = f"{rag_answer_for_combine}\n\n---\n\n{final_answer}"
+
     return {
         "skill_used": skill_used,
         "tool_calls": tool_call_records,
-        "final_answer": final_answer,
+        "final_answer": combined_answer,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "tool_agent", started_at,
-            input_summary={"user_input": user_input[:60], "match": "function_calling"},
+            input_summary={"user_input": user_input[:60],
+                           "match": "post_action" if is_post_action else "function_calling"},
             output_summary={
                 "tool_call_count": len(tool_call_records),
                 "tools_used": [r["name"] for r in tool_call_records],
                 "answer_preview": final_answer[:80],
                 "tokens": node_tokens,
+                "is_post_action": is_post_action,
             },
         ),
     }

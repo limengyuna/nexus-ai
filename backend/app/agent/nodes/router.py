@@ -150,9 +150,20 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         logger.warning("[Router] 收到未知 intent: {}, 降级到 chitchat", intent)
         intent = ROUTE_CHITCHAT
 
-    # 验证 recommended_skill 是否真实存在
+    # ---------- 后处理：关键词预匹配覆盖 intent ----------
+    # 当 LLM 判断为 rag 时，用关键词匹配检查是否命中了 Skill（如 document_summarizer）
+    # 如果命中且该 Skill 允许在有 KB 时触发，覆盖 intent 为 tool
     matched_skill_name = None
-    if intent == ROUTE_TOOL and recommended_skill:
+    if intent == ROUTE_RAG and has_kb:
+        matched = skill_registry.match_by_keywords(user_input, has_kb=True)
+        if matched:
+            logger.info("[Router] 关键词预匹配命中 Skill '{}', 覆盖 intent: rag → tool", matched.name)
+            intent = ROUTE_TOOL
+            matched_skill_name = matched.name
+            reason = f"关键词匹配覆盖：{reason} → 触发技能 {matched.name}"
+
+    # 验证 LLM 推荐的 recommended_skill 是否真实存在（仅在未被关键词覆盖时）
+    if matched_skill_name is None and intent == ROUTE_TOOL and recommended_skill:
         from app.agent.skills import get_skill
         if get_skill(recommended_skill) is not None:
             matched_skill_name = recommended_skill
@@ -160,16 +171,35 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         else:
             logger.warning("[Router] LLM 推荐的 Skill '{}' 不存在，忽略", recommended_skill)
 
-    logger.info("[Router] LLM 决策 → {} | 理由: {} | skill: {}", intent, reason, matched_skill_name)
+    # ---------- 后处理：操作关键词检测 ----------
+    _POST_ACTION_KEYWORDS = ["写入", "保存", "存入", "导出", "写到", "写进", "存到", "存进", "发送", "发给"]
+    has_action_keywords = any(kw in user_input for kw in _POST_ACTION_KEYWORDS)
+
+    # 有环图：当 intent=rag 且有操作关键词时，RAG Agent 执行完后继续路由到 Tool Agent
+    needs_post_action = False
+    if intent == ROUTE_RAG and has_action_keywords:
+        needs_post_action = True
+        logger.info("[Router] 检测到操作关键词，设置 needs_post_action=True")
+
+    # 复合请求检测：当同时有 matched_skill 和操作关键词时，
+    # 取消强制 Skill，让 FC 循环自主处理复合请求（先调 Skill 再调 MCP 工具）
+    if matched_skill_name and has_action_keywords:
+        logger.info("[Router] 复合请求（{} + 操作），取消强制 Skill，走 FC 循环", matched_skill_name)
+        matched_skill_name = None
+
+    logger.info("[Router] LLM 决策 → {} | 理由: {} | skill: {} | post_action: {}",
+                intent, reason, matched_skill_name, needs_post_action)
 
     result = {
         "intent": intent,
         "route_reason": reason,
+        "needs_post_action": needs_post_action,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "router", started_at,
             input_summary={"user_input": user_input[:80], "has_kb": has_kb},
-            output_summary={"intent": intent, "reason": reason, "skill": matched_skill_name, "tokens": node_tokens},
+            output_summary={"intent": intent, "reason": reason, "skill": matched_skill_name,
+                            "needs_post_action": needs_post_action, "tokens": node_tokens},
         ),
     }
     if matched_skill_name:

@@ -4,9 +4,11 @@ LangGraph 主图编排
 拓扑：
 
     START → context_prep → router → [条件路由]
-                                      ├── rag      → END
-                                      ├── tool     → END
-                                      └── chitchat → END
+                                      ├── rag_agent → [后续判断]
+                                      │                 ├── 需要操作 → tool_agent → END
+                                      │                 └── 不需要  → END
+                                      ├── tool_agent → END
+                                      └── fallback   → END
 
 未来扩展点：
 - 在 rag/tool 之后加 "reflector" 节点做答案质量自检
@@ -31,6 +33,14 @@ def _route_by_intent(state: AgentState) -> Literal["rag_agent", "tool_agent", "f
     if intent == ROUTE_TOOL:
         return "tool_agent"
     return "fallback"  # chitchat 或未知 intent 走 fallback
+
+
+def _after_rag(state: AgentState) -> Literal["tool_agent", "__end__"]:
+    """有环图：RAG Agent 执行完后，判断是否需要继续路由到 Tool Agent 执行后续操作"""
+    if state.get("needs_post_action", False):
+        logger.info("[有环图] RAG Agent 完成，继续路由到 Tool Agent 执行后续操作")
+        return "tool_agent"
+    return "__end__"
 
 
 # ---------- 图构建 ----------
@@ -64,13 +74,18 @@ def build_agent_graph():
         },
     )
 
-    # 终止：三个分支都直接到 END
-    workflow.add_edge("rag_agent", END)
+    # 终止：
+    # rag_agent 通过条件边判断是否需要后续操作（有环图）
+    workflow.add_conditional_edges(
+        "rag_agent",
+        _after_rag,
+        {"tool_agent": "tool_agent", "__end__": END},
+    )
     workflow.add_edge("tool_agent", END)
     workflow.add_edge("fallback", END)
 
     compiled = workflow.compile()
-    logger.info("LangGraph 主图编译完成 (节点: context_prep, router, rag_agent, tool_agent, fallback)")
+    logger.info("LangGraph 主图编译完成 (节点: context_prep, router, rag_agent, tool_agent, fallback; 有环图: rag_agent → tool_agent)")
     return compiled
 
 

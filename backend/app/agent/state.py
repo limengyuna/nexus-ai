@@ -72,6 +72,7 @@ class AgentState(TypedDict, total=False):
     intent: str                                # 意图标签：rag / tool / chitchat
     route_reason: str                          # Router 的推理说明（可选，便于追踪）
     matched_skill: Optional[str]               # Router 关键词预匹配到的 Skill 名称（强制执行）
+    needs_post_action: bool                    # RAG 后是否需要继续路由到 Tool Agent 执行操作（有环图）
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果
@@ -115,6 +116,7 @@ def make_initial_state(
         context_messages=[],
         intent="",
         route_reason="",
+        needs_post_action=False,
         retrieved_docs=[],
         retrieved_memories=[],
         tool_calls=[],

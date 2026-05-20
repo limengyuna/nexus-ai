@@ -103,6 +103,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 
     token_queue = state.get("_token_queue")  # 提前取出，所有路径都可能需要
 
+    needs_post_action = state.get("needs_post_action", False)
+
     def _push_early_return(answer: str):
         """early return 时推送 meta + chunk + done，避免队列消费方卡死"""
         if token_queue:
@@ -112,7 +114,9 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
                 "skill_used": state.get("skill_used"),
             }))
             token_queue.put(("chunk", answer))
-            token_queue.put(("done", None))
+            # 有环图：如果需要后续操作，不发 done，让 Tool Agent 接力
+            if not needs_post_action:
+                token_queue.put(("done", None))
 
     if kb_id is None:
         # Router 已经做了 fallback，正常不会进到这里；但保险起见处理一下
@@ -272,8 +276,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
     finally:
-        if token_queue:
+        # 有环图：如果需要后续操作，不发 done 信号，让队列消费循环继续等待 Tool Agent 的输出
+        if token_queue and not needs_post_action:
             token_queue.put(("done", None))
+        elif token_queue and needs_post_action:
+            # 推送分隔符，提示用户后续将执行操作
+            token_queue.put(("chunk", "\n\n---\n\n"))
 
     # ---------- 4. 根据 LLM 回答中的引用标记 adopted ----------
     # 解析 LLM 回答中的 "资料 #N" 引用，标记被实际使用的 chunk

@@ -36,6 +36,7 @@ langchain-text-splitters==0.3.2   # 仅引入分块策略，不引入整个 lang
 dashscope==1.20.11                # 阿里通义 Embedding / LLM SDK
 pypdf==5.1.0                      # PDF 解析
 python-docx==1.1.2                # Word 文档解析
+jieba==0.42.1                     # 中文分词（BM25 关键词检索用）
 
 # ---------- 阶段三：Agent 引擎 ----------
 langgraph==0.2.34                 # Agent 状态机框架（核心）
