@@ -12,17 +12,18 @@
 
 ## 项目经历
 
-**NexusAI —— 企业级智能知识库 + 多 Agent 协作平台（全栈开发）** `2026.04 - 2026.05`
+**NexusAI —— 基于 LangGraph 的 RAG 多智能体平台（全栈开发）** `2026.04 - 2026.05`
 
 **技术栈**：Python + FastAPI + LangGraph + ChromaDB + Celery + PostgreSQL + Redis + Vue 3 + TypeScript + TailwindCSS + Docker
 
-**项目描述**：一个基于大模型驱动的 AI 中台，集成 RAG 检索增强生成、LangGraph 多 Agent 状态机编排、Skills 技能系统与 MCP 协议双向集成，支持私有知识问答、多步推理与外部工具调用，具备完整的可观测性与企业级安全加固。
+**项目描述**：基于 LLM 驱动的多智能体平台，集成 RAG 双路召回（向量 + BM25）、LangGraph 状态机编排、Skills 技能系统与 MCP 协议双向集成，支持私有知识问答、多步推理与外部工具调用，具备完整的可观测性与安全加固。
 
-- **LangGraph 多 Agent 状态机编排**：基于 LangGraph 有向图设计 Router → RAG Agent / Tool Agent / Fallback 三路分发架构，Router 先关键词预匹配 Skill 走快速路径（无 KB 场景下跳过 LLM 直接路由），匹配不到再调 LLM 分类；严格 TypedDict 状态贯穿全流程，支持 Fallback 降级与超时控制
-- **完整 RAG 管道与 3 种分块策略**：实现"上传→解析→分块→Embedding→向量入库→检索→生成"全管道。策略模式封装 3 种分块：Recursive（通用）、Markdown Header（保留结构）、**Semantic Splitter**（基于 Embedding 余弦距离检测语义跳变点）；Celery 异步处理，前端实时展示进度
-- **Skills 技能编排层（5 Skill / 4 种形态）**：设计 Tool → Skill → Agent 三层能力抽象，实现单 Tool 增强、LLM-Tool-LLM 三明治、纯 LLM 链式、multi-query RAG、多源综合调研 5 种编排形态
+- **LangGraph 多 Agent 状态机编排**：基于 LangGraph 有向图设计 Router → RAG Agent / Tool Agent / Fallback 三路分发架构，Router 先关键词预匹配（含 `allow_with_kb` 白名单机制）走快速路径，匹配不到再调 LLM 分类；严格 TypedDict 状态贯穿全流程，统一 context_prep 节点注入上下文，支持 Fallback 降级与超时控制
+- **RAG 双路召回 + 检索增强**：向量语义检索 +自实现 BM25 关键词检索，RRF 算法融合两路排名；Contextual Embedding 将章节路径注入 embedding 输入，解决标题类查询召回率低的问题；Query Rewrite 结合对话历史消歧指代；LLM 回答后解析引用标注，前端高亮实际被采纳的 chunk
+- **3 种分块策略 + 结构化解析**：策略模式封装 Recursive（通用）、Markdown Header（保留标题层级）、Semantic Splitter（余弦距离检测语义跳变 + 动态阈值 + 碎片合并兜底）；改造 Word 解析器识别 Heading 样式（含自定义样式模糊匹配）转 Markdown，过滤 TOC 目录噪音；Celery 异步处理，前端实时展示进度
+- **Skills 技能编排层（5 Skill / 4 种形态）**：设计 Tool → Skill → Agent 三层能力抽象，实现单 Tool 增强、LLM-Tool-LLM 三明治、纯 LLM 链式、multi-query RAG 检索总结、Map-Reduce 长文档全文总结 5 种编排形态
 - **MCP 协议双向集成**：作为 Server 将 RAG + 知识库通过标准 MCP 协议暴露给 Claude Desktop / Cursor 等客户端；作为 Client 动态发现和调用外部 MCP Server 工具，实现"即插即用"扩展
-- **流式响应 + 可观测性 + 企业级加固**：ASGI 异步 SSE 流式输出（5 种事件） + 前端打字机效果；execution_trace 记录完整推理链路并前端可视化；JWT + 多租户隔离 + slowapi 限流 + Prompt Injection 防护 + Docker Compose 6 服务一键部署
+- **流式 SSE + 可观测性 + 安全加固**：`asyncio.to_thread` + Queue 桥接同步 LangGraph 与异步 SSE，实现逐 token 流式输出（5 种事件）；execution_trace 记录完整推理链路并前端可视化；JWT + 多租户隔离 + slowapi 限流 + Prompt Injection 软防护 + Docker Compose 一键部署
 
 ---
 

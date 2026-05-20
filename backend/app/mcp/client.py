@@ -13,7 +13,11 @@ MCP Client：让 Agent 动态调用外部 MCP Server 的工具
 - invoke_external_tool(config_id, tool_name, args): 调用一个外部工具
 """
 import os
+import sys
+import asyncio
+import threading
 import time
+from concurrent.futures import Future
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -27,6 +31,53 @@ from app.core.database import SessionLocal
 from app.models.mcp_server import MCPServerConfig, MCPTransportType
 
 
+def _run_in_proactor_thread(coro):
+    """
+    Windows 专属桥接器：
+    当使用 uvicorn --reload 开发模式启动时，事件循环会被强行修改为 SelectorEventLoop。
+    该循环在 Windows 下不支持子进程管道，会导致 stdio 形式的 MCP 启动失败（NotImplementedError）。
+    这里启动一个临时的 ProactorEventLoop 线程来安全运行子进程，并把结果桥接回主 Selector 线程。
+    """
+    current_loop = None
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+    # 仅在 Windows 且当前运行着 SelectorEventLoop 时启动线程桥接
+    if sys.platform == "win32" and current_loop and current_loop.__class__.__name__ == "_WindowsSelectorEventLoop":
+        logger.info("[MCP Client] 检测到 Windows SelectorEventLoop，启动 WindowsProactorEventLoop 线程进行桥接...")
+        future = Future()
+
+        def _target():
+            loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                res = loop.run_until_complete(coro)
+                future.set_result(res)
+            except Exception as e:
+                future.set_exception(e)
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        return asyncio.wrap_future(future)
+    else:
+        # 其他系统或已经是 Proactor 循环时，直接正常 await
+        return coro
+
+
+
+async def _default_list_roots(context) -> Any:
+    """默认的 roots 列出回调，防止支持 roots 要求的 MCP Server 握手时卡死超时"""
+    import mcp.types as mcp_types
+    return mcp_types.ListRootsResult(roots=[])
+
+
 # ---------- 内部：建立 MCP Client Session ----------
 @asynccontextmanager
 async def _open_session(config: MCPServerConfig) -> AsyncIterator[ClientSession]:
@@ -36,23 +87,43 @@ async def _open_session(config: MCPServerConfig) -> AsyncIterator[ClientSession]
     if config.transport_type == MCPTransportType.STDIO:
         # connection_uri 形如 "npx -y @modelcontextprotocol/server-github"
         parts = config.connection_uri.split()
+        command = parts[0]
+        args = parts[1:]
+        
+        # Windows 下 npx/node 等命令实际是 .cmd 批处理文件，
+        # asyncio subprocess_exec 不走 shell，不会自动解析 .cmd 后缀
+        if sys.platform == "win32":
+            import shutil
+            resolved = shutil.which(command)
+            if resolved:
+                # 优先使用 shutil.which 解析出的绝对路径（例如 C:\Program Files\nodejs\npx.cmd）
+                command = resolved
+            elif not command.endswith(".cmd"):
+                command = command + ".cmd"
+                
+            # 针对 Windows 上的 npx 提速：如果使用了 npx，且参数中没有 --prefer-offline，则自动注入
+            # 这可以强制 npm 优先使用本地缓存，避免每次启动都耗费 40s 联网查询和下载临时包
+            if "npx" in command.lower() and "--prefer-offline" not in [a.lower() for a in args]:
+                # 插入到最前面
+                args.insert(0, "--prefer-offline")
+                
         # 合并系统环境变量 + 用户配置的 env_vars，避免丢失 PATH 等关键变量
-        merged_env = None
+        merged_env = {**os.environ}
         if config.env_vars:
-            merged_env = {**os.environ, **config.env_vars}
+            merged_env.update(config.env_vars)
         params = StdioServerParameters(
-            command=parts[0],
-            args=parts[1:],
+            command=command,
+            args=args,
             env=merged_env,
         )
         async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
+            async with ClientSession(read, write, list_roots_callback=_default_list_roots) as session:
                 await session.initialize()
                 yield session
 
     elif config.transport_type == MCPTransportType.SSE:
         async with sse_client(config.connection_uri) as (read, write):
-            async with ClientSession(read, write) as session:
+            async with ClientSession(read, write, list_roots_callback=_default_list_roots) as session:
                 await session.initialize()
                 yield session
     else:
@@ -81,7 +152,7 @@ async def list_external_tools(config_id: int) -> List[Dict[str, Any]]:
 
     logger.info("[MCP Client] 连接外部 server: {} ({})", config.name, config.transport_type.value)
 
-    try:
+    async def _impl():
         async with _open_session(config) as session:
             tools_resp = await session.list_tools()
             tools = [
@@ -94,9 +165,13 @@ async def list_external_tools(config_id: int) -> List[Dict[str, Any]]:
             ]
             logger.info("[MCP Client] 拉到 {} 个外部工具: {}", len(tools), [t["name"] for t in tools])
             return tools
+
+    try:
+        return await _run_in_proactor_thread(_impl())
     except Exception as e:
         logger.exception("[MCP Client] list_tools 失败")
         raise RuntimeError(f"连接外部 MCP Server 失败: {e}")
+
 
 
 async def invoke_external_tool(
@@ -122,16 +197,20 @@ async def invoke_external_tool(
     arguments = arguments or {}
     logger.info("[MCP Client] 调用外部工具 {} on {} args={}", tool_name, config.name, arguments)
 
-    async with _open_session(config) as session:
-        result = await session.call_tool(tool_name, arguments)
-        # result.content 是 list[TextContent | ImageContent | ...]
-        contents = []
-        for item in result.content:
-            if hasattr(item, "text"):
-                contents.append(item.text)
-            else:
-                contents.append(str(item))
-        return "\n".join(contents) if len(contents) > 1 else (contents[0] if contents else "")
+    async def _impl():
+        async with _open_session(config) as session:
+            result = await session.call_tool(tool_name, arguments)
+            # result.content 是 list[TextContent | ImageContent | ...]
+            contents = []
+            for item in result.content:
+                if hasattr(item, "text"):
+                    contents.append(item.text)
+                else:
+                    contents.append(str(item))
+            return "\n".join(contents) if len(contents) > 1 else (contents[0] if contents else "")
+
+    return await _run_in_proactor_thread(_impl())
+
 
 
 # ---------- 测试连接（不需要先入库）----------
@@ -162,22 +241,26 @@ async def test_connection(
     )
 
     start = time.time()
-    try:
+
+    async def _impl():
         async with _open_session(temp_config) as session:
             tools_resp = await session.list_tools()
-            tools = tools_resp.tools
-            elapsed_ms = int((time.time() - start) * 1000)
-            logger.info(
-                "[MCP Client] test_connection 成功: {} 个工具, {}ms",
-                len(tools), elapsed_ms,
-            )
-            return {
-                "ok": True,
-                "tools_count": len(tools),
-                "latency_ms": elapsed_ms,
-                "tools": [t.name for t in tools[:5]],
-                "error": None,
-            }
+            return tools_resp.tools
+
+    try:
+        tools = await _run_in_proactor_thread(_impl())
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.info(
+            "[MCP Client] test_connection 成功: {} 个工具, {}ms",
+            len(tools), elapsed_ms,
+        )
+        return {
+            "ok": True,
+            "tools_count": len(tools),
+            "latency_ms": elapsed_ms,
+            "tools": [t.name for t in tools[:5]],
+            "error": None,
+        }
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
         logger.warning("[MCP Client] test_connection 失败: {}", e)
@@ -188,3 +271,4 @@ async def test_connection(
             "tools": [],
             "error": str(e),
         }
+

@@ -41,7 +41,7 @@ python-docx==1.1.2                # Word 文档解析
 langgraph==0.2.34                 # Agent 状态机框架（核心）
 openai==1.57.0                    # 1.54 与 httpx 0.28+ 不兼容（proxies 参数已移除），1.57 修复
 tiktoken==0.8.0                   # Token 计算（摘要压缩判断阈值用）
-mcp==1.1.0                        # Anthropic 官方 MCP SDK（双向集成）
+mcp>=1.2.0                        # Anthropic 官方 MCP SDK（双向集成）
 tavily-python>=0.5.0              # Tavily Search API（AI 专用搜索，中文效果好）
 
 # ---------- 阶段五：企业化加固 ----------

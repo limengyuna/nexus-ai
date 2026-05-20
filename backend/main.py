@@ -9,6 +9,13 @@ NexusAI 后端服务入口
     # 或直接执行本文件
     python main.py
 """
+import sys
+import asyncio
+
+if sys.platform == "win32":
+    # 强制在 Windows 上使用 ProactorEventLoopPolicy，以支持 stdio 子进程（MCP Server 启动）
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from contextlib import asynccontextmanager
 
 import uvicorn
