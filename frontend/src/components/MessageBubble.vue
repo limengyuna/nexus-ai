@@ -6,11 +6,12 @@
  * - AI 消息：左侧 + 白底 + Markdown 渲染 + hover 显示复制/重新生成
  */
 import { computed, ref } from 'vue'
-import { Check, Copy, RotateCcw } from 'lucide-vue-next'
+import { Check, Copy, RotateCcw, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import type { ChatMessage } from '@/api/chat'
 import { renderMarkdown } from '@/utils/markdown'
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   message: ChatMessage
@@ -21,8 +22,35 @@ const emit = defineEmits<{
   regenerate: []
 }>()
 
+const chatStore = useChatStore()
+
 const isUser = computed(() => props.message.role === 'user')
 const renderedHtml = computed(() => renderMarkdown(props.message.content))
+
+// 判断 LocalStorage 中是否有该条消息的思考快照
+const hasStoredTrace = computed(() => {
+  if (isUser.value) return false
+  try {
+    const raw = localStorage.getItem('nexus_thinking_traces')
+    if (!raw) return false
+    const tracesStore = JSON.parse(raw)
+    const conv = tracesStore.find((item: any) => item.sessionId === props.message.session_id)
+    if (conv && conv.snapshots) {
+      return conv.snapshots.some((s: any) => s.messageId === props.message.id)
+    }
+  } catch {}
+  return false
+})
+
+// 判断当前右侧展示的是否是本消息的思考过程
+const isThinkingActive = computed(() => {
+  return chatStore.activeThinkingMessageId === props.message.id
+})
+
+function viewTraceOfThisMessage() {
+  chatStore.loadThinkingTraceForMessage(props.message.session_id, props.message.id)
+  toast.success('已载入该条消息的推理链路')
+}
 
 // 复制成功瞬时反馈（图标短暂切换为 ✓）
 const copied = ref(false)
@@ -102,6 +130,20 @@ const shortTime = computed(() => {
         <span v-if="!isUser && message.token_usage" class="text-gray-400 dark:text-gray-500">
           · {{ message.token_usage }} tokens
         </span>
+
+        <!-- 思考过程查看按钮 -->
+        <button
+          v-if="!isUser && hasStoredTrace"
+          @click="viewTraceOfThisMessage"
+          class="flex items-center gap-1 transition-all rounded px-1.5 py-0.5 cursor-pointer text-xs"
+          :class="isThinkingActive
+            ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/40 font-semibold border border-primary-200 dark:border-primary-800'
+            : 'text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
+          title="点击在右侧面板查看本条消息的完整思考与工具调用链路"
+        >
+          <Sparkles :size="10" :class="isThinkingActive ? 'animate-pulse text-primary-500' : ''" />
+          <span>思考过程</span>
+        </button>
 
         <!-- 操作按钮组 hover 时显示 -->
         <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

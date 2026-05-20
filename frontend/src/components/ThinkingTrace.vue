@@ -10,11 +10,25 @@
  * - 执行链路时间线
  */
 import { computed, ref } from 'vue'
-import { Sparkles, Zap } from 'lucide-vue-next'
+import { Sparkles, Zap, Copy, Check } from 'lucide-vue-next'
 
 import { useChatStore } from '@/stores/chat'
 
 const chat = useChatStore()
+
+// 复制工具/Skill 调用的结果
+const copiedIndex = ref<number | null>(null)
+
+function copyToClipboard(text: string, index: number) {
+  navigator.clipboard.writeText(text).then(() => {
+    copiedIndex.value = index
+    setTimeout(() => {
+      copiedIndex.value = null
+    }, 2000)
+  }).catch((err) => {
+    console.error('Failed to copy text: ', err)
+  })
+}
 
 // RAG 片段展开状态（key 为索引）
 const expandedDocs = ref<Set<number>>(new Set())
@@ -116,8 +130,18 @@ function intentColor(intent: string): string {
               <span class="text-xs text-gray-400 dark:text-gray-500">{{ tc.kind }}</span>
             </div>
             <details class="text-xs">
-              <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">参数/结果</summary>
-              <pre class="mt-1.5 p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto text-gray-700 dark:text-gray-200">{{ formatArgs({ arguments: tc.arguments, result: tc.result }) }}</pre>
+              <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">参数/结果</summary>
+              <div class="relative group mt-1.5">
+                <button
+                  @click="copyToClipboard(formatArgs({ arguments: tc.arguments, result: tc.result }), i)"
+                  class="absolute right-2 top-2 p-1.5 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 z-10"
+                  title="复制参数和结果"
+                >
+                  <Check v-slot:default v-if="copiedIndex === i" :size="13" class="text-green-600 dark:text-green-400" />
+                  <Copy v-slot:default v-else :size="13" />
+                </button>
+                <pre class="p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto text-gray-700 dark:text-gray-200 pr-10 select-all">{{ formatArgs({ arguments: tc.arguments, result: tc.result }) }}</pre>
+              </div>
             </details>
           </div>
         </div>

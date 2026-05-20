@@ -16,6 +16,73 @@ import type {
 } from '@/api/chat'
 import * as chatApi from '@/api/chat'
 
+// ---------- LocalStorage 思考过程持久化辅助函数 ----------
+function saveThinkingTrace(
+  sessionId: number,
+  messageId: number,
+  data: {
+    intent: string
+    route_reason: string
+    skill_used: string | null
+    execution_trace: TraceStep[]
+    tool_calls: ToolCall[]
+    retrieved_docs: RetrievedDoc[]
+  }
+) {
+  try {
+    const raw = localStorage.getItem('nexus_thinking_traces')
+    let tracesStore: any[] = raw ? JSON.parse(raw) : []
+
+    // 找到当前会话的存储记录
+    let conv = tracesStore.find((item) => item.sessionId === sessionId)
+    if (!conv) {
+      conv = {
+        sessionId,
+        lastUpdated: Date.now(),
+        snapshots: []
+      }
+      tracesStore.push(conv)
+    }
+
+    // 构造当前消息的思考过程快照
+    const snapshot = {
+      messageId,
+      intent: data.intent,
+      routeReason: data.route_reason,
+      skillUsed: data.skill_used,
+      trace: data.execution_trace,
+      toolCalls: data.tool_calls,
+      retrievedDocs: data.retrieved_docs,
+      timestamp: Date.now()
+    }
+
+    // 去重：如果同一个 messageId 已经有了，先删掉旧的
+    conv.snapshots = conv.snapshots.filter((s: any) => s.messageId !== messageId)
+    // 头部追加最新的快照
+    conv.snapshots.unshift(snapshot)
+    // 每个会话最多保存最新的 3 个思考过程
+    if (conv.snapshots.length > 3) {
+      conv.snapshots = conv.snapshots.slice(0, 3)
+    }
+
+    // 更新最后活跃时间
+    conv.lastUpdated = Date.now()
+
+    // 将本会话移动到最前（作为最新活跃会话）
+    tracesStore = tracesStore.filter((item) => item.sessionId !== sessionId)
+    tracesStore.unshift(conv)
+
+    // 保证总共只保留最新活跃的 3 个会话的思考过程，多余的彻底淘汰（LRU淘汰策略）
+    if (tracesStore.length > 3) {
+      tracesStore = tracesStore.slice(0, 3)
+    }
+
+    localStorage.setItem('nexus_thinking_traces', JSON.stringify(tracesStore))
+  } catch (err) {
+    console.error('Failed to save thinking trace to localStorage:', err)
+  }
+}
+
 export const useChatStore = defineStore('chat', () => {
   // ---------- 状态 ----------
   const sessions = ref<ChatSession[]>([])
@@ -31,6 +98,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastTrace = ref<TraceStep[]>([])
   const lastToolCalls = ref<ToolCall[]>([])
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
+  const activeThinkingMessageId = ref<number | null>(null)
 
   // ---------- 计算属性 ----------
   const activeSession = computed(() =>
@@ -47,12 +115,63 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function loadThinkingTrace(sessionId: number) {
+    try {
+      const raw = localStorage.getItem('nexus_thinking_traces')
+      if (!raw) {
+        clearTrace()
+        return
+      }
+      const tracesStore = JSON.parse(raw)
+      const conv = tracesStore.find((item: any) => item.sessionId === sessionId)
+      if (conv && conv.snapshots && conv.snapshots.length > 0) {
+        const snapshot = conv.snapshots[0]
+        lastIntent.value = snapshot.intent
+        lastRouteReason.value = snapshot.routeReason
+        lastSkillUsed.value = snapshot.skillUsed
+        lastTrace.value = snapshot.trace || []
+        lastToolCalls.value = snapshot.toolCalls || []
+        lastRetrievedDocs.value = snapshot.retrievedDocs || []
+        activeThinkingMessageId.value = snapshot.messageId
+      } else {
+        clearTrace()
+      }
+    } catch (err) {
+      console.error('Failed to load thinking trace from localStorage:', err)
+      clearTrace()
+    }
+  }
+
+  function loadThinkingTraceForMessage(sessionId: number, messageId: number) {
+    try {
+      const raw = localStorage.getItem('nexus_thinking_traces')
+      if (!raw) return
+      const tracesStore = JSON.parse(raw)
+      const conv = tracesStore.find((item: any) => item.sessionId === sessionId)
+      if (conv && conv.snapshots) {
+        const snapshot = conv.snapshots.find((s: any) => s.messageId === messageId)
+        if (snapshot) {
+          lastIntent.value = snapshot.intent
+          lastRouteReason.value = snapshot.routeReason
+          lastSkillUsed.value = snapshot.skillUsed
+          lastTrace.value = snapshot.trace || []
+          lastToolCalls.value = snapshot.toolCalls || []
+          lastRetrievedDocs.value = snapshot.retrievedDocs || []
+          activeThinkingMessageId.value = snapshot.messageId
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load snapshot for message:', err)
+    }
+  }
+
   async function selectSession(sessionId: number | null) {
     activeSessionId.value = sessionId
     messages.value = []
     clearTrace()
     if (sessionId !== null) {
       messages.value = await chatApi.listMessages(sessionId)
+      loadThinkingTrace(sessionId)
     }
   }
 
@@ -66,6 +185,17 @@ export const useChatStore = defineStore('chat', () => {
   async function deleteSession(sessionId: number) {
     await chatApi.deleteSession(sessionId)
     sessions.value = sessions.value.filter((s) => s.id !== sessionId)
+    
+    // 清理 localStorage 中的会话数据
+    try {
+      const raw = localStorage.getItem('nexus_thinking_traces')
+      if (raw) {
+        let tracesStore = JSON.parse(raw)
+        tracesStore = tracesStore.filter((item: any) => item.sessionId !== sessionId)
+        localStorage.setItem('nexus_thinking_traces', JSON.stringify(tracesStore))
+      }
+    } catch {}
+
     if (activeSessionId.value === sessionId) {
       await selectSession(null)
     }
@@ -122,6 +252,18 @@ export const useChatStore = defineStore('chat', () => {
       lastTrace.value = resp.execution_trace
       lastToolCalls.value = resp.tool_calls
       lastRetrievedDocs.value = resp.retrieved_docs
+
+      // 保存最新思考快照到 LocalStorage
+      const assistantMsg = messages.value.find((m) => m.role === 'assistant' && m.id > 0)
+      const messageId = assistantMsg ? assistantMsg.id : Date.now()
+      saveThinkingTrace(activeSessionId.value, messageId, {
+        intent: resp.intent,
+        route_reason: resp.route_reason,
+        skill_used: resp.skill_used,
+        execution_trace: resp.execution_trace,
+        tool_calls: resp.tool_calls,
+        retrieved_docs: resp.retrieved_docs,
+      })
 
       // 会话标题可能被后端更新（首次发消息时）
       await fetchSessions()
@@ -200,6 +342,19 @@ export const useChatStore = defineStore('chat', () => {
           lastTrace.value = data.execution_trace
           lastToolCalls.value = data.tool_calls
           lastRetrievedDocs.value = data.retrieved_docs
+
+          // 保存思考过程到 LocalStorage
+          if (activeSessionId.value) {
+            saveThinkingTrace(activeSessionId.value, data.message_id, {
+              intent: lastIntent.value,
+              route_reason: lastRouteReason.value,
+              skill_used: lastSkillUsed.value,
+              execution_trace: data.execution_trace,
+              tool_calls: data.tool_calls,
+              retrieved_docs: data.retrieved_docs,
+            })
+          }
+
           // 会话标题可能变了（首条消息时）
           await fetchSessions()
         },
@@ -225,6 +380,7 @@ export const useChatStore = defineStore('chat', () => {
     lastTrace.value = []
     lastToolCalls.value = []
     lastRetrievedDocs.value = []
+    activeThinkingMessageId.value = null
   }
 
   return {
@@ -240,6 +396,7 @@ export const useChatStore = defineStore('chat', () => {
     lastTrace,
     lastToolCalls,
     lastRetrievedDocs,
+    activeThinkingMessageId,
     fetchSessions,
     selectSession,
     createSession,
@@ -248,5 +405,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     sendMessageStream,
     clearTrace,
+    loadThinkingTraceForMessage,
   }
 })
