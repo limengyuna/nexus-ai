@@ -103,20 +103,10 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 
     token_queue = state.get("_token_queue")  # 提前取出，所有路径都可能需要
 
-    needs_post_action = state.get("needs_post_action", False)
-
     def _push_early_return(answer: str):
-        """early return 时推送 meta + chunk + done，避免队列消费方卡死"""
+        """early return 时推送 chunk（不发 done，由 Supervisor 统一控制）"""
         if token_queue:
-            token_queue.put(("meta", {
-                "intent": state.get("intent", ""),
-                "route_reason": state.get("route_reason", ""),
-                "skill_used": state.get("skill_used"),
-            }))
             token_queue.put(("chunk", answer))
-            # 有环图：如果需要后续操作，不发 done，让 Tool Agent 接力
-            if not needs_post_action:
-                token_queue.put(("done", None))
 
     if kb_id is None:
         # Router 已经做了 fallback，正常不会进到这里；但保险起见处理一下
@@ -234,14 +224,6 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
 
     token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
 
-    # 流式模式：先推送 Router 决策，让前端立即展示
-    if token_queue:
-        token_queue.put(("meta", {
-            "intent": state.get("intent", ""),
-            "route_reason": state.get("route_reason", ""),
-            "skill_used": state.get("skill_used"),
-        }))
-
     try:
         if token_queue:
             # ---------- 真流式：逐 token 推送给前端 ----------
@@ -276,12 +258,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
     finally:
-        # 有环图：如果需要后续操作，不发 done 信号，让队列消费循环继续等待 Tool Agent 的输出
-        if token_queue and not needs_post_action:
-            token_queue.put(("done", None))
-        elif token_queue and needs_post_action:
-            # 推送分隔符，提示用户后续将执行操作
-            token_queue.put(("chunk", "\n\n---\n\n"))
+        # Supervisor 架构：RAG Agent 不发 done 信号，由 Supervisor 统一控制流程结束
+        pass
 
     # ---------- 4. 根据 LLM 回答中的引用标记 adopted ----------
     # 解析 LLM 回答中的 "资料 #N" 引用，标记被实际使用的 chunk

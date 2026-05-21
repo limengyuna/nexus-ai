@@ -104,7 +104,7 @@ export function sendMessage(sessionId: number, message: string): Promise<ChatRes
 // ---------- SSE 流式 ----------
 export interface StreamHandlers {
   onStatus?: (data: { step: string; user_msg_id?: number }) => void
-  onMeta?: (data: { intent: string; route_reason: string; skill_used: string | null }) => void
+  onMeta?: (data: { intent: string; route_reason: string; skill_used: string | null; task_plan?: any[] }) => void
   onChunk?: (text: string) => void
   onDone?: (data: {
     message_id: number
@@ -113,6 +113,7 @@ export interface StreamHandlers {
     execution_trace: TraceStep[]
     retrieved_docs: RetrievedDoc[]
     retrieved_memories: RetrievedMemory[]
+    task_plan: any[]
     token_usage: number
     agent_source: string
   }) => void

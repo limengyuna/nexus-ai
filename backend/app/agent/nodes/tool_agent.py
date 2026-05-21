@@ -120,101 +120,14 @@ def _invoke_mcp_tool(config_id: int, original_name: str, arguments: Dict[str, An
         return {"error": str(e)}
 
 
-def _execute_matched_skill(state: AgentState, started_at: float) -> Optional[Dict[str, Any]]:
-    """
-    若 Router 已关键词匹配到 Skill，直接执行该 Skill，跳过 LLM 选工具环节。
-    返回 None 表示无匹配，走正常 function calling 流程。
-    """
-    matched_skill_name = state.get("matched_skill")
-    if not matched_skill_name:
-        return None
-
-    skill_obj = get_skill(matched_skill_name)
-    if skill_obj is None:
-        logger.warning("[Tool Agent] Router 匹配的 Skill '{}' 不存在，降级到 FC 流程", matched_skill_name)
-        return None
-
-    user_input = state.get("user_input", "")
-    token_queue = state.get("_token_queue")
-    context_messages = state.get("context_messages", [])
-
-    # 流式模式：推送 Router 决策
-    if token_queue:
-        token_queue.put(("meta", {
-            "intent": state.get("intent", ""),
-            "route_reason": state.get("route_reason", ""),
-            "skill_used": matched_skill_name,
-        }))
-
-    logger.info("[Tool Agent] Router 已匹配 Skill '{}'，直接执行（跳过 FC）", matched_skill_name)
-
-    # 执行 Skill
-    skill_context = {
-        "kb_id": state.get("kb_id"),
-        "context_messages": context_messages,
-    }
-    try:
-        skill_result = skill_obj.execute(user_input, context=skill_context)
-    except Exception as e:
-        logger.exception("[Tool Agent] 强制执行 Skill '{}' 失败", matched_skill_name)
-        # 降级：返回 None，走正常 FC 流程
-        return None
-
-    answer = skill_result.get("answer", "")
-    tool_call_records: List[ToolCallRecord] = []
-    for stc in skill_result.get("tool_calls", []):
-        tool_call_records.append(ToolCallRecord(
-            name=stc["name"],
-            kind=stc.get("kind", "tool"),
-            arguments=stc.get("arguments", {}),
-            result=stc.get("result"),
-        ))
-
-    # 流式模式：推送答案 + 结束信号
-    if token_queue:
-        if answer:
-            token_queue.put(("chunk", answer))
-        token_queue.put(("done", None))
-
-    return {
-        "skill_used": matched_skill_name,
-        "tool_calls": tool_call_records,
-        "final_answer": answer,
-        "total_tokens": state.get("total_tokens", 0),
-        "execution_trace": append_trace(
-            state, "tool_agent", started_at,
-            input_summary={"user_input": user_input[:60], "match": f"forced_skill:{matched_skill_name}"},
-            output_summary={
-                "tool_call_count": len(tool_call_records),
-                "skill_used": matched_skill_name,
-                "answer_preview": answer[:80],
-            },
-        ),
-    }
 
 
 def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, Any]:
-    """LLM Function Calling 主循环（最多 3 轮，避免死循环）"""
-    is_post_action = state.get("needs_post_action", False)
-
-    # 优先检查：Router 已关键词匹配到 Skill，直接执行（后续操作模式下跳过，避免走 Skill 而不是 MCP 工具）
-    if not is_post_action:
-        forced_result = _execute_matched_skill(state, started_at)
-        if forced_result is not None:
-            return forced_result
-
+    """LLM Function Calling 主循环（最多 6 轮，避免死循环）"""
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
     token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
     llm = get_llm()
-
-    # 流式模式：推送 Router 决策（后续操作模式下跳过，RAG Agent 已推送过）
-    if token_queue and not is_post_action:
-        token_queue.put(("meta", {
-            "intent": state.get("intent", ""),
-            "route_reason": state.get("route_reason", ""),
-            "skill_used": state.get("skill_used"),
-        }))
 
     # 统一工具池：内部 Tool + MCP 外部工具 + Skill
     internal_tools = tool_registry.to_openai_tools()
@@ -226,6 +139,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
     # 上下文由 context_prep 统一注入到 state.context_messages
     context_messages = state.get("context_messages", [])
+    node_tokens = 0
 
     if not openai_tools:
         # 没有可用工具，直接让 LLM 回答
@@ -237,10 +151,9 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             temperature=0.3,
         )
         node_tokens += usage.get("total_tokens", 0)
-        # 流式模式：推送答案 + 结束信号
+        # 流式模式：推送答案（不发 done，由 Supervisor 控制）
         if token_queue:
             token_queue.put(("chunk", answer))
-            token_queue.put(("done", None))
         return {
             "final_answer": answer,
             "tool_calls": [],
@@ -258,21 +171,20 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         *context_messages,
     ]
 
-    # 有环图：后续操作模式下，注入 RAG 回答作为上下文，让 LLM 知道已有内容
-    rag_answer_for_combine = ""
-    if is_post_action:
-        rag_answer = state.get("final_answer", "")
-        rag_answer_for_combine = rag_answer
-        if rag_answer:
-            messages.append({
-                "role": "assistant",
-                "content": f"我已经从知识库中检索到以下内容：\n\n{rag_answer}",
-            })
-            messages.append({
-                "role": "user",
-                "content": "请根据上面检索到的内容，完成我之前要求的后续操作（如写入文件、保存、发送等）。只需要执行操作并报告结果，不需要重复上面的内容。",
-            })
-        logger.info("[Tool Agent] 后续操作模式：注入 RAG 回答 ({} 字符) 作为上下文", len(rag_answer))
+    # Supervisor 架构：如果有 Supervisor 指令或已有 RAG 回答，注入上下文
+    supervisor_instruction = state.get("supervisor_instruction", "")
+    existing_answer = state.get("final_answer", "")
+    if existing_answer:
+        messages.append({
+            "role": "assistant",
+            "content": f"我已经从知识库中检索到以下内容：\n\n{existing_answer[:3000]}",
+        })
+    if supervisor_instruction:
+        messages.append({
+            "role": "user",
+            "content": supervisor_instruction,
+        })
+        logger.info("[Tool Agent] Supervisor 指令：{}", supervisor_instruction[:100])
 
     tool_call_records: List[ToolCallRecord] = []
     skill_used: Optional[str] = None
@@ -413,14 +325,12 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         final_answer, max_usage = llm.complete_counted(messages=messages, temperature=0.3)
         node_tokens += max_usage.get("total_tokens", 0)
 
-    # 流式模式：推送最终答案 + 结束信号
-    def _push_answer_and_done():
+    # 流式模式：推送最终答案（不发 done，由 Supervisor 统一控制）
+    def _push_answer():
         if token_queue and final_answer:
             token_queue.put(("chunk", final_answer))
-        if token_queue:
-            token_queue.put(("done", None))
 
-    # 清理 DeepSeek DSML 标记（兆底：防止 LLM 输出原始工具调用 XML）
+    # 清理 DeepSeek DSML 标记（兜底：防止 LLM 输出原始工具调用 XML）
     if final_answer and "DSML" in final_answer:
         import re
         # 移除 DSML/XML 标记
@@ -435,28 +345,21 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         else:
             final_answer = cleaned
 
-    _push_answer_and_done()
-
-    # 有环图：后续操作模式下，合并 RAG 回答 + Tool 操作结果为最终回答
-    combined_answer = final_answer
-    if is_post_action and rag_answer_for_combine:
-        combined_answer = f"{rag_answer_for_combine}\n\n---\n\n{final_answer}"
+    _push_answer()
 
     return {
         "skill_used": skill_used,
         "tool_calls": tool_call_records,
-        "final_answer": combined_answer,
+        "final_answer": final_answer,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "tool_agent", started_at,
-            input_summary={"user_input": user_input[:60],
-                           "match": "post_action" if is_post_action else "function_calling"},
+            input_summary={"user_input": user_input[:60], "match": "function_calling"},
             output_summary={
                 "tool_call_count": len(tool_call_records),
                 "tools_used": [r["name"] for r in tool_call_records],
                 "answer_preview": final_answer[:80],
                 "tokens": node_tokens,
-                "is_post_action": is_post_action,
             },
         ),
     }

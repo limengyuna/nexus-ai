@@ -1,52 +1,51 @@
 """
-LangGraph 主图编排
+LangGraph 主图编排 — Supervisor 多 Agent 协作架构
 
 拓扑：
 
-    START → context_prep → router → [条件路由]
-                                      ├── rag_agent → [后续判断]
-                                      │                 ├── 需要操作 → tool_agent → END
-                                      │                 └── 不需要  → END
-                                      ├── tool_agent → END
-                                      └── fallback   → END
+    START → context_prep → supervisor ←→ [循环]
+                              │              ├── rag_agent → supervisor
+                              │              ├── tool_agent → supervisor
+                              │              └── FINISH → END
+                              └──────────────────────────┘
 
-未来扩展点：
-- 在 rag/tool 之后加 "reflector" 节点做答案质量自检
-- 在 chitchat 后加 interrupt_before 做人工审批（Human-in-the-loop）
+Supervisor 是调度中心：
+- 分析用户意图，决定分发给 RAG Agent / Tool Agent / 自己回答
+- 子 Agent 执行完后回到 Supervisor，Supervisor 再决策是否继续
+- 支持复合请求："查知识库再写文件" → RAG Agent → Tool Agent → FINISH
+
+设计原则：
+- Supervisor 最多循环 3 次，防止无限循环
+- 闲聊 / 简单问答由 Supervisor 直接回答，不分发
+- done 信号由 Supervisor 决策 FINISH 时发出
 """
 from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 from loguru import logger
 
-from app.agent.nodes import context_prep_node, fallback_node, rag_agent_node, router_node, tool_agent_node
-from app.agent.nodes.router import ROUTE_CHITCHAT, ROUTE_RAG, ROUTE_TOOL
+from app.agent.nodes.context_prep import context_prep_node
+from app.agent.nodes.supervisor import supervisor_node, NEXT_RAG, NEXT_TOOL, NEXT_FINISH
+from app.agent.nodes.rag_agent import rag_agent_node
+from app.agent.nodes.tool_agent import tool_agent_node
 from app.agent.state import AgentState
 
 
-# ---------- 条件边：按 intent 分发 ----------
-def _route_by_intent(state: AgentState) -> Literal["rag_agent", "tool_agent", "fallback"]:
-    """从 Router 出来后，按 intent 选择下游节点"""
-    intent = state.get("intent", ROUTE_CHITCHAT)
-    if intent == ROUTE_RAG:
+# ---------- 条件边：Supervisor 决策后的路由 ----------
+def _supervisor_route(state: AgentState) -> Literal["rag_agent", "tool_agent", "__end__"]:
+    """根据 Supervisor 的 next_agent 决策路由"""
+    next_agent = state.get("next_agent", NEXT_FINISH)
+    if next_agent == NEXT_RAG:
         return "rag_agent"
-    if intent == ROUTE_TOOL:
+    if next_agent == NEXT_TOOL:
         return "tool_agent"
-    return "fallback"  # chitchat 或未知 intent 走 fallback
-
-
-def _after_rag(state: AgentState) -> Literal["tool_agent", "__end__"]:
-    """有环图：RAG Agent 执行完后，判断是否需要继续路由到 Tool Agent 执行后续操作"""
-    if state.get("needs_post_action", False):
-        logger.info("[有环图] RAG Agent 完成，继续路由到 Tool Agent 执行后续操作")
-        return "tool_agent"
-    return "__end__"
+    return "__end__"  # FINISH → 结束
 
 
 # ---------- 图构建 ----------
 def build_agent_graph():
     """
-    构建并编译 LangGraph 工作流。
+    构建并编译 LangGraph Supervisor 工作流。
 
     返回 compiled graph，可调用 .invoke(state) 或 .stream(state)。
     """
@@ -54,38 +53,31 @@ def build_agent_graph():
 
     # 注册节点
     workflow.add_node("context_prep", context_prep_node)
-    workflow.add_node("router", router_node)
+    workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("rag_agent", rag_agent_node)
     workflow.add_node("tool_agent", tool_agent_node)
-    workflow.add_node("fallback", fallback_node)
 
-    # 入口：从 START 进入 context_prep，再到 router
+    # 入口：START → context_prep → supervisor
     workflow.add_edge(START, "context_prep")
-    workflow.add_edge("context_prep", "router")
+    workflow.add_edge("context_prep", "supervisor")
 
-    # 条件路由
+    # Supervisor 条件路由：决定分发给谁或结束
     workflow.add_conditional_edges(
-        "router",
-        _route_by_intent,
+        "supervisor",
+        _supervisor_route,
         {
             "rag_agent": "rag_agent",
             "tool_agent": "tool_agent",
-            "fallback": "fallback",
+            "__end__": END,
         },
     )
 
-    # 终止：
-    # rag_agent 通过条件边判断是否需要后续操作（有环图）
-    workflow.add_conditional_edges(
-        "rag_agent",
-        _after_rag,
-        {"tool_agent": "tool_agent", "__end__": END},
-    )
-    workflow.add_edge("tool_agent", END)
-    workflow.add_edge("fallback", END)
+    # 子 Agent 执行完后回到 Supervisor（循环）
+    workflow.add_edge("rag_agent", "supervisor")
+    workflow.add_edge("tool_agent", "supervisor")
 
     compiled = workflow.compile()
-    logger.info("LangGraph 主图编译完成 (节点: context_prep, router, rag_agent, tool_agent, fallback; 有环图: rag_agent → tool_agent)")
+    logger.info("LangGraph Supervisor 主图编译完成 (节点: context_prep, supervisor, rag_agent, tool_agent; 循环: agent → supervisor)")
     return compiled
 
 

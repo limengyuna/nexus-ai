@@ -68,11 +68,13 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[List[Dict[str, Any]], add_messages]  # 当前轮次对话消息（追加式）
     context_messages: List[Dict[str, Any]]     # context_prep 统一注入的上下文（纯 dict，不经过 reducer）
 
-    # ---------- Router 决策 ----------
+    # ---------- Supervisor 决策 ----------
     intent: str                                # 意图标签：rag / tool / chitchat
-    route_reason: str                          # Router 的推理说明（可选，便于追踪）
-    matched_skill: Optional[str]               # Router 关键词预匹配到的 Skill 名称（强制执行）
-    needs_post_action: bool                    # RAG 后是否需要继续路由到 Tool Agent 执行操作（有环图）
+    route_reason: str                          # Supervisor 的推理说明
+    next_agent: str                            # Supervisor 当前决策：rag_agent / tool_agent / FINISH
+    supervisor_instruction: str                # Supervisor 给子 Agent 的指令
+    agent_iterations: int                      # Supervisor 循环计数（防止无限循环）
+    task_plan: List[Dict[str, Any]]            # Supervisor 动态任务计划
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果
@@ -116,7 +118,10 @@ def make_initial_state(
         context_messages=[],
         intent="",
         route_reason="",
-        needs_post_action=False,
+        next_agent="",
+        supervisor_instruction="",
+        agent_iterations=0,
+        task_plan=[],
         retrieved_docs=[],
         retrieved_memories=[],
         tool_calls=[],

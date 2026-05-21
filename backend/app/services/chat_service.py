@@ -256,16 +256,14 @@ class ChatService:
 
         # 4. 保存 Agent 回复
         answer = final_state.get("final_answer", "") or "（无输出）"
-        # 决定 agent_source
+        # 决定 agent_source（Supervisor 架构下 intent 由 Supervisor 设置）
         intent = final_state.get("intent", "")
         if intent == "rag":
             src = AgentSource.RAG
         elif intent == "tool":
             src = AgentSource.TOOL
-        elif intent == "router":
-            src = AgentSource.ROUTER
         else:
-            src = AgentSource.TOOL if final_state.get("skill_used") else AgentSource.ROUTER
+            src = AgentSource.ROUTER
 
         # tool_calls_json 安全序列化（含可能的不可序列化对象时降级）
         tool_calls_payload = None
@@ -441,14 +439,13 @@ class ChatService:
         answer = final_state.get("final_answer", "") or "（无输出）"
         intent = final_state.get("intent", "")
 
+        # Supervisor 架构下 intent 由 Supervisor 设置
         if intent == "rag":
             src = AgentSource.RAG
         elif intent == "tool":
             src = AgentSource.TOOL
-        elif intent == "router":
-            src = AgentSource.ROUTER
         else:
-            src = AgentSource.TOOL if final_state.get("skill_used") else AgentSource.ROUTER
+            src = AgentSource.ROUTER
 
         tool_calls_payload = None
         try:
@@ -513,6 +510,9 @@ class ChatService:
         retrieved_memories = json.loads(
             json.dumps(final_state.get("retrieved_memories", []), default=str)
         )
+        task_plan = json.loads(
+            json.dumps(final_state.get("task_plan", []), default=str)
+        )
         yield (
             "done",
             {
@@ -522,6 +522,7 @@ class ChatService:
                 "execution_trace": execution_trace,
                 "retrieved_docs": retrieved_docs,
                 "retrieved_memories": retrieved_memories,
+                "task_plan": task_plan,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
                 "agent_source": src.value if hasattr(src, "value") else str(src),
             },

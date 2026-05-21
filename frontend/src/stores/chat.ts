@@ -98,6 +98,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastIntent = ref('')
   const lastRouteReason = ref('')
   const lastSkillUsed = ref<string | null>(null)
+  const lastTaskPlan = ref<any[]>([])  // Supervisor 动态任务计划
   const lastTrace = ref<TraceStep[]>([])
   const lastToolCalls = ref<ToolCall[]>([])
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
@@ -328,11 +329,15 @@ export const useChatStore = defineStore('chat', () => {
         onStatus: () => {
           // 当前不展示阶段状态，但保留 hook 便于将来加 "Agent 正在思考..." 提示
         },
-        onMeta: (data) => {
-          // 提前更新思考过程的 Router 决策（chunks 还在流，思考面板已能看到判断）
+        onMeta: (data: any) => {
+          // 提前更新思考过程（chunks 还在流，思考面板已能看到判断）
           lastIntent.value = data.intent
           lastRouteReason.value = data.route_reason
           lastSkillUsed.value = data.skill_used
+          // 接收 Supervisor 的任务计划
+          if (data.task_plan) {
+            lastTaskPlan.value = data.task_plan
+          }
           // 同步 agent_source
           if (data.intent === 'rag') assistantRef.agent_source = 'rag'
           else if (data.intent === 'tool') assistantRef.agent_source = 'tool'
@@ -351,6 +356,10 @@ export const useChatStore = defineStore('chat', () => {
           lastToolCalls.value = data.tool_calls
           lastRetrievedDocs.value = data.retrieved_docs
           lastRetrievedMemories.value = data.retrieved_memories || []
+          // 更新 task_plan 为最终完整状态
+          if (data.task_plan && data.task_plan.length > 0) {
+            lastTaskPlan.value = data.task_plan
+          }
 
           // 保存思考过程到 LocalStorage
           if (activeSessionId.value) {
@@ -387,6 +396,7 @@ export const useChatStore = defineStore('chat', () => {
     lastIntent.value = ''
     lastRouteReason.value = ''
     lastSkillUsed.value = null
+    lastTaskPlan.value = []
     lastTrace.value = []
     lastToolCalls.value = []
     lastRetrievedDocs.value = []
@@ -404,6 +414,7 @@ export const useChatStore = defineStore('chat', () => {
     lastIntent,
     lastRouteReason,
     lastSkillUsed,
+    lastTaskPlan,
     lastTrace,
     lastToolCalls,
     lastRetrievedDocs,
