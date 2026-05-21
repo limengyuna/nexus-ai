@@ -87,12 +87,7 @@ class MemoryRetriever:
                 if not fact or fact.user_id != user_id:
                     continue
 
-                # kb_id 范围过滤：
-                # - 全局记忆 (fact.kb_id is None) 始终可以被检索
-                # - 知识库专属记忆 (fact.kb_id == kb_id) 仅当会话绑定了对应 kb 时可见
-                if fact.kb_id is not None:
-                    if kb_id is None or fact.kb_id != kb_id:
-                        continue
+                # 所有记忆统一为全局可见，靠语义相似度自然过滤相关性
 
                 cosine_similarity = 1.0 - hit.score
                 # 综合得分 = 0.7 * 余弦相似度 + 0.3 * 重要性

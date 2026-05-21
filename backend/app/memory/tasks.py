@@ -81,8 +81,7 @@ def _extract_batch_facts_worker(
         saved_count = 0
         for fact_dict in extracted_facts:
             try:
-                # preference 类型为全局记忆，不绑定 kb_id
-                fact_kb_id = None if fact_dict["fact_type"] == "preference" else kb_id
+                # 所有记忆统一为全局可见（kb_id=None），召回时靠语义相似度自然过滤
                 MemoryStore.save_fact(
                     db=db,
                     user_id=user_id,
@@ -90,7 +89,7 @@ def _extract_batch_facts_worker(
                     fact_type=fact_dict["fact_type"],
                     importance=fact_dict["importance"],
                     session_id=session_id,
-                    kb_id=fact_kb_id
+                    kb_id=None
                 )
                 saved_count += 1
             except Exception as e:
@@ -176,8 +175,7 @@ def _extract_turn_facts_worker(
         saved_count = 0
         for fact_dict in extracted_facts:
             try:
-                # preference 类型为全局记忆，不绑定 kb_id
-                fact_kb_id = None if fact_dict["fact_type"] == "preference" else kb_id
+                # 所有记忆统一为全局可见（kb_id=None），召回时靠语义相似度自然过滤
                 MemoryStore.save_fact(
                     db=db,
                     user_id=user_id,
@@ -185,7 +183,7 @@ def _extract_turn_facts_worker(
                     fact_type=fact_dict["fact_type"],
                     importance=fact_dict["importance"],
                     session_id=session_id,
-                    kb_id=fact_kb_id
+                    kb_id=None
                 )
                 saved_count += 1
             except Exception as e:

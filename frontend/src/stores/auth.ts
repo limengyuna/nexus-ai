@@ -41,6 +41,8 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem(TOKEN_KEY)
+    // 清除聊天相关的本地缓存，防止切换用户后看到上一个用户的数据
+    localStorage.removeItem('nexus_thinking_traces')
   }
 
   return {

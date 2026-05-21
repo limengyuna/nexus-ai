@@ -169,10 +169,14 @@ const activeKbName = computed(() => {
 
 async function handleSend() {
   const text = inputText.value.trim()
-  if (!text || !chat.activeSessionId || chat.sending) return
+  if (!text || chat.sending) return
   inputText.value = ''
   errorMsg.value = ''
   try {
+    // 如果没有活跃会话，自动创建一个新会话
+    if (!chat.activeSessionId) {
+      await chat.createSession('新对话')
+    }
     // 默认走 SSE 流式（打字机效果），出错降级到普通发送
     await chat.sendMessageStream(text)
   } catch (e: any) {
@@ -554,12 +558,12 @@ function onKeyDown(e: KeyboardEvent) {
             placeholder="输入消息，Enter 发送，Shift+Enter 换行"
             rows="2"
             class="flex-1 resize-none px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
-            :disabled="!chat.activeSessionId || chat.sending"
+            :disabled="chat.sending"
             @keydown="onKeyDown"
           ></textarea>
           <button
             class="px-5 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed self-end"
-            :disabled="!inputText.trim() || !chat.activeSessionId || chat.sending"
+            :disabled="!inputText.trim() || chat.sending"
             @click="handleSend"
           >
             发送
