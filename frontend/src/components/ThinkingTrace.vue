@@ -3,9 +3,9 @@
  * 思考过程面板 — Task Pipeline 视图
  *
  * 展示 Supervisor 的任务拆解和分步执行进度：
- * 1. 顶部：Supervisor 决策摘要（intent + 计划概述）
- * 2. 核心：Task Plan 进度管道（步骤卡片 + 状态动画）
- * 3. 详情：工具调用 / RAG 检索（按步骤归类）
+ * 1. 顶部：Supervisor 决策摘要（intent + 计划概述 + 渐变发光进度条）
+ * 2. 核心：Task Plan 进度管道（内嵌关联工具及知识库的折叠卡片 + 紫绿流光呼吸动效）
+ * 3. 详情：全局工具调用 / RAG 检索明细折叠
  * 4. 底部：执行链路时间线 + Token 用量
  */
 import { computed, ref } from 'vue'
@@ -18,7 +18,7 @@ import { useChatStore } from '@/stores/chat'
 
 const chat = useChatStore()
 
-// 复制
+// 复制功能
 const copiedIndex = ref<number | null>(null)
 function copyToClipboard(text: string, index: number) {
   navigator.clipboard.writeText(text).then(() => {
@@ -27,13 +27,33 @@ function copyToClipboard(text: string, index: number) {
   }).catch((err) => console.error('Failed to copy:', err))
 }
 
-// RAG 片段展开
+// 步骤卡片内部的工具折叠状态
+const expandedStepTools = ref<Set<number>>(new Set())
+function toggleStepTools(stepNum: number) {
+  if (expandedStepTools.value.has(stepNum)) {
+    expandedStepTools.value.delete(stepNum)
+  } else {
+    expandedStepTools.value.add(stepNum)
+  }
+}
+
+// 步骤卡片内部的文档折叠状态
+const expandedStepDocs = ref<Set<number>>(new Set())
+function toggleStepDocs(stepNum: number) {
+  if (expandedStepDocs.value.has(stepNum)) {
+    expandedStepDocs.value.delete(stepNum)
+  } else {
+    expandedStepDocs.value.add(stepNum)
+  }
+}
+
+// RAG 全局片段展开
 const expandedDocs = ref<Set<number>>(new Set())
 function toggleDoc(index: number) {
   expandedDocs.value.has(index) ? expandedDocs.value.delete(index) : expandedDocs.value.add(index)
 }
 
-// 工具调用展开
+// 全局工具调用展开
 const expandedTools = ref(false)
 
 const hasData = computed(() =>
@@ -76,7 +96,7 @@ function stepStatusIcon(status: string) {
 }
 
 function stepStatusColor(status: string) {
-  if (status === 'completed') return 'text-emerald-500'
+  if (status === 'completed') return 'text-emerald-500 dark:text-emerald-400'
   if (status === 'in_progress') return 'text-primary-500 animate-spin'
   return 'text-gray-300 dark:text-gray-600'
 }
@@ -129,15 +149,15 @@ function agentBadgeClass(agent: string) {
         <p v-if="chat.lastRouteReason" class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
           {{ chat.lastRouteReason }}
         </p>
-        <!-- 计划概览 -->
+        <!-- 渐变发光计划概览 -->
         <div v-if="hasTaskPlan" class="mt-3 flex items-center gap-2">
-          <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden border border-gray-100/10 dark:border-gray-800/10">
             <div
-              class="h-full bg-gradient-to-r from-primary-400 to-emerald-400 rounded-full transition-all duration-700 ease-out"
+              class="h-full bg-gradient-to-r from-violet-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-700 ease-out shadow-[0_0_8px_rgba(16,185,129,0.4)]"
               :style="{ width: totalSteps > 0 ? `${(completedSteps / totalSteps) * 100}%` : '0%' }"
             ></div>
           </div>
-          <span class="text-[10px] font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          <span class="text-[10px] font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
             {{ completedSteps }}/{{ totalSteps }}
           </span>
         </div>
@@ -146,7 +166,7 @@ function agentBadgeClass(agent: string) {
       <!-- ========== Task Plan 管道 ========== -->
       <section v-if="hasTaskPlan">
         <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-1.5">
-          <Sparkles :size="12" />
+          <Sparkles :size="12" class="text-primary-500" />
           执行计划
         </div>
         <div class="relative">
@@ -160,43 +180,115 @@ function agentBadgeClass(agent: string) {
               class="relative pl-9 pb-4 last:pb-0"
             >
               <!-- 状态图标 -->
-              <div class="absolute left-0 top-0.5 w-[30px] flex justify-center">
-                <component
-                  :is="stepStatusIcon(step.status)"
-                  :size="16"
-                  :stroke-width="2.5"
-                  :class="stepStatusColor(step.status)"
-                />
+              <div class="absolute left-0 top-0.5 w-[30px] flex justify-center z-10">
+                <div class="bg-white dark:bg-gray-900 rounded-full p-0.5">
+                  <component
+                    :is="stepStatusIcon(step.status)"
+                    :size="16"
+                    :stroke-width="2.5"
+                    :class="stepStatusColor(step.status)"
+                  />
+                </div>
               </div>
 
               <!-- 步骤卡片 -->
               <div
-                class="rounded-lg border p-3 transition-all duration-200"
+                class="rounded-lg border p-3 transition-all duration-300 shadow-sm"
                 :class="{
-                  'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10': step.status === 'completed',
-                  'border-primary-200 bg-primary-50/50 dark:border-primary-800 dark:bg-primary-900/10 ring-1 ring-primary-100 dark:ring-primary-900': step.status === 'in_progress',
-                  'border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-800/30': step.status === 'pending',
+                  'border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-emerald-50/10 dark:border-emerald-950 dark:bg-emerald-950/20 shadow-emerald-100/50 dark:shadow-none': step.status === 'completed',
+                  'border-primary-400 bg-gradient-to-br from-primary-50/50 to-primary-50/10 dark:border-primary-850 dark:bg-primary-950/20 ring-1 ring-primary-300 dark:ring-primary-700 shadow-lg shadow-primary-500/5 dark:shadow-none animate-border-pulse': step.status === 'in_progress',
+                  'border-dashed border-gray-200 bg-gray-50/30 dark:border-gray-800 dark:bg-gray-800/10 opacity-70': step.status === 'pending',
                 }"
               >
-                <div class="flex items-center gap-2 mb-1">
+                <div class="flex items-center gap-2 mb-1.5">
                   <span class="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500">STEP {{ step.step }}</span>
                   <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium" :class="agentBadgeClass(step.agent)">
                     <component :is="agentIcon(step.agent)" :size="10" />
                     {{ agentLabel(step.agent) }}
                   </span>
-                  <span v-if="step.status === 'completed'" class="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">✓ 完成</span>
-                  <span v-else-if="step.status === 'in_progress'" class="ml-auto text-[10px] text-primary-600 dark:text-primary-400 font-medium">执行中...</span>
+                  <span v-if="step.status === 'completed'" class="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5">
+                    ✓ 完成
+                  </span>
+                  <span v-else-if="step.status === 'in_progress'" class="ml-auto text-[10px] text-primary-600 dark:text-primary-400 font-semibold animate-pulse flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-ping"></span>
+                    执行中...
+                  </span>
                 </div>
-                <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                <p class="text-xs text-gray-700 dark:text-gray-200 leading-relaxed font-medium">
                   {{ step.instruction }}
                 </p>
+
+                <!-- 步骤内嵌：工具调用明细（重磅升级） -->
+                <div v-if="step.agent === 'tool_agent' && chat.lastToolCalls.length > 0" class="mt-2.5 pt-2 border-t border-gray-100 dark:border-gray-800/50">
+                  <div 
+                    class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                    @click.stop="toggleStepTools(step.step)"
+                  >
+                    <component :is="expandedStepTools.has(step.step) ? ChevronDown : ChevronRight" :size="11" />
+                    <Wrench :size="11" class="text-purple-500" />
+                    <span>此步骤工具调用 ({{ chat.lastToolCalls.length }} 次)</span>
+                  </div>
+                  <div v-if="expandedStepTools.has(step.step)" class="mt-2 space-y-1.5 animate-slide-down">
+                    <div 
+                      v-for="(tc, tcIdx) in chat.lastToolCalls" 
+                      :key="tcIdx"
+                      class="border border-gray-100 dark:border-gray-800/80 rounded-lg p-2.5 bg-white dark:bg-gray-900 shadow-sm"
+                    >
+                      <div class="flex items-center justify-between text-[11px] mb-1">
+                        <span class="font-mono font-semibold text-purple-700 dark:text-purple-300 truncate max-w-[150px]">{{ tc.name }}</span>
+                        <span class="text-[9px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium scale-90">{{ tc.kind }}</span>
+                      </div>
+                      <details class="text-[10px]">
+                        <summary class="cursor-pointer text-gray-450 dark:text-gray-400 hover:text-gray-650 dark:hover:text-gray-250 select-none">参数 / 返回值</summary>
+                        <div class="relative group mt-1">
+                          <button
+                            @click.stop="copyToClipboard(formatArgs({ arguments: tc.arguments, result: tc.result }), tcIdx + 100)"
+                            class="absolute right-1 top-1 p-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-650 dark:text-gray-500 dark:hover:text-gray-300 z-10 shadow-sm"
+                            title="复制"
+                          >
+                            <Check v-if="copiedIndex === tcIdx + 100" :size="10" class="text-green-500" />
+                            <Copy v-else :size="10" />
+                          </button>
+                          <pre class="p-1.5 bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800/80 rounded text-[9px] text-gray-600 dark:text-gray-450 overflow-x-auto max-h-32 overflow-y-auto font-mono pr-8">{{ formatArgs({ arguments: tc.arguments, result: tc.result }) }}</pre>
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 步骤内嵌：RAG 检索明细（重磅升级） -->
+                <div v-if="step.agent === 'rag_agent' && chat.lastRetrievedDocs.length > 0" class="mt-2.5 pt-2 border-t border-gray-100 dark:border-gray-800/50">
+                  <div 
+                    class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                    @click.stop="toggleStepDocs(step.step)"
+                  >
+                    <component :is="expandedStepDocs.has(step.step) ? ChevronDown : ChevronRight" :size="11" />
+                    <BookOpen :size="11" class="text-blue-500" />
+                    <span>此步骤检索知识 ({{ chat.lastRetrievedDocs.length }} 段)</span>
+                  </div>
+                  <div v-if="expandedStepDocs.has(step.step)" class="mt-2 space-y-1.5 animate-slide-down">
+                    <div 
+                      v-for="(doc, docIdx) in chat.lastRetrievedDocs.slice(0, 3)" 
+                      :key="docIdx"
+                      class="border rounded-lg p-2.5 bg-white dark:bg-gray-900 shadow-sm transition-all"
+                      :class="doc.adopted !== false ? 'border-blue-100 dark:border-blue-900/40' : 'border-gray-100 dark:border-gray-800 opacity-60'"
+                    >
+                      <div class="flex items-center justify-between text-[10px] mb-1">
+                        <span class="font-medium text-blue-700 dark:text-blue-400 truncate max-w-[160px]">#{{ docIdx + 1 }} {{ doc.metadata?.file_name || '知识片段' }}</span>
+                        <span class="text-[9px] text-gray-400 dark:text-gray-500">{{ doc.score?.toFixed(3) }}</span>
+                      </div>
+                      <p class="text-[10px] text-gray-500 dark:text-gray-450 line-clamp-2 leading-relaxed whitespace-pre-wrap break-all">{{ doc.content }}</p>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ========== 工具调用 ========== -->
+      <!-- ========== 全局明细折叠面板：工具调用 ========== -->
       <section v-if="chat.lastToolCalls.length > 0">
         <div
           class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200"
@@ -204,7 +296,7 @@ function agentBadgeClass(agent: string) {
         >
           <component :is="expandedTools ? ChevronDown : ChevronRight" :size="12" />
           <Wrench :size="12" />
-          工具调用
+          全局工具日志
           <span class="text-gray-400 dark:text-gray-500 font-normal">({{ chat.lastToolCalls.length }} 次)</span>
         </div>
         <div v-if="expandedTools" class="space-y-2">
@@ -228,18 +320,18 @@ function agentBadgeClass(agent: string) {
                   <Check v-if="copiedIndex === i" :size="12" class="text-green-600 dark:text-green-400" />
                   <Copy v-else :size="12" />
                 </button>
-                <pre class="p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto text-[11px] text-gray-700 dark:text-gray-200 pr-10 max-h-40 overflow-y-auto">{{ formatArgs({ arguments: tc.arguments, result: tc.result }) }}</pre>
+                <pre class="p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto text-[11px] text-gray-700 dark:text-gray-200 pr-10 max-h-40 overflow-y-auto font-mono">{{ formatArgs({ arguments: tc.arguments, result: tc.result }) }}</pre>
               </div>
             </details>
           </div>
         </div>
       </section>
 
-      <!-- ========== RAG 检索结果 ========== -->
+      <!-- ========== 全局明细折叠面板：RAG 检索结果 ========== -->
       <section v-if="chat.lastRetrievedDocs.length > 0">
         <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5">
           <BookOpen :size="12" />
-          RAG 检索
+          全局知识检索
           <span class="text-gray-400 dark:text-gray-500 font-normal">({{ chat.lastRetrievedDocs.length }} 段)</span>
         </div>
         <div class="space-y-2">
@@ -248,7 +340,7 @@ function agentBadgeClass(agent: string) {
             :key="i"
             class="border rounded-lg p-2.5 cursor-pointer transition-colors"
             :class="doc.adopted !== false
-              ? 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-900/20 hover:bg-blue-50/70 dark:hover:bg-blue-900/30'
+              ? 'border-blue-250 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-900/20 hover:bg-blue-50/70 dark:hover:bg-blue-900/30'
               : 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/30 opacity-60 hover:opacity-80'"
             @click="toggleDoc(i)"
           >
@@ -343,5 +435,35 @@ function agentBadgeClass(agent: string) {
 }
 .animate-spin {
   animation: spin 1.2s linear infinite;
+}
+
+/* 高端紫绿流光呼吸动画 */
+@keyframes border-pulse {
+  0%, 100% {
+    border-color: rgba(139, 92, 246, 0.4);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.08);
+  }
+  50% {
+    border-color: rgba(16, 185, 129, 0.8);
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+  }
+}
+.animate-border-pulse {
+  animation: border-pulse 2.2s infinite ease-in-out;
+}
+
+/* 折叠面板展开微动画 */
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-slide-down {
+  animation: slide-down 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 </style>

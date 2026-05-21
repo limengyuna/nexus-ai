@@ -444,6 +444,14 @@ def _dispatch_step(
 
     logger.info("[Supervisor] 分发 step {} → {} | {}", step["step"], next_agent, instruction[:50])
 
+    # 实时推送 meta 消息给前端，同步任务执行状态（例如：第一步变完成，第二步变执行中）
+    if token_queue:
+        token_queue.put(("meta", {
+            "intent": intent,
+            "route_reason": reason,
+            "task_plan": task_plan,
+        }))
+
     return {
         "next_agent": next_agent,
         "intent": intent,
@@ -467,9 +475,6 @@ def _finish_done(
     token_queue, iterations: int, started_at: float, node_tokens: int, reason: str
 ) -> Dict[str, Any]:
     """所有步骤完成，发送 done 信号"""
-    if token_queue:
-        token_queue.put(("done", None))
-
     # 确定最终 intent（取最后一个 completed 步骤的 agent 类型）
     last_agent = ""
     for step in reversed(task_plan):
@@ -477,6 +482,15 @@ def _finish_done(
             last_agent = step["agent"]
             break
     intent = "rag" if last_agent == NEXT_RAG else ("tool" if last_agent == NEXT_TOOL else "chitchat")
+
+    # 在发送 done 结束信号前，先推送一次“所有任务均已完成 (completed)”的最终 task_plan，确保前端渲染完美打勾
+    if token_queue:
+        token_queue.put(("meta", {
+            "intent": intent,
+            "route_reason": reason or "所有步骤已完成",
+            "task_plan": task_plan,
+        }))
+        token_queue.put(("done", None))
 
     return {
         "next_agent": NEXT_FINISH,

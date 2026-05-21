@@ -29,6 +29,7 @@ function saveThinkingTrace(
     tool_calls: ToolCall[]
     retrieved_docs: RetrievedDoc[]
     retrieved_memories?: RetrievedMemory[]
+    task_plan?: any[] // 新增执行计划字段
   }
 ) {
   try {
@@ -56,6 +57,7 @@ function saveThinkingTrace(
       toolCalls: data.tool_calls,
       retrievedDocs: data.retrieved_docs,
       retrievedMemories: data.retrieved_memories || [],
+      taskPlan: data.task_plan || [], // 新增持久化存储执行计划
       timestamp: Date.now()
     }
 
@@ -138,6 +140,7 @@ export const useChatStore = defineStore('chat', () => {
         lastToolCalls.value = snapshot.toolCalls || []
         lastRetrievedDocs.value = snapshot.retrievedDocs || []
         lastRetrievedMemories.value = snapshot.retrievedMemories || []
+        lastTaskPlan.value = snapshot.taskPlan || [] // 恢复加载本地存储的执行计划
         activeThinkingMessageId.value = snapshot.messageId
       } else {
         clearTrace()
@@ -164,6 +167,7 @@ export const useChatStore = defineStore('chat', () => {
           lastToolCalls.value = snapshot.toolCalls || []
           lastRetrievedDocs.value = snapshot.retrievedDocs || []
           lastRetrievedMemories.value = snapshot.retrievedMemories || []
+          lastTaskPlan.value = snapshot.taskPlan || [] // 切换消息时，恢复加载对应执行计划
           activeThinkingMessageId.value = snapshot.messageId
         }
       }
@@ -371,6 +375,7 @@ export const useChatStore = defineStore('chat', () => {
               tool_calls: data.tool_calls,
               retrieved_docs: data.retrieved_docs,
               retrieved_memories: data.retrieved_memories,
+              task_plan: lastTaskPlan.value, // 完美传入最新执行计划
             })
           }
 
