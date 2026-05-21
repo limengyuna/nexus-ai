@@ -72,7 +72,15 @@ def _load_mcp_tools(user_id: Optional[int]) -> Tuple[List[Dict[str, Any]], Dict[
 
         for config in configs:
             try:
-                tools = asyncio.run(list_external_tools(config.id))
+                tools = config.cached_tools
+                # 如果缓存为空，则发起一次实时拉取并回写缓存
+                if not tools:
+                    tools = asyncio.run(list_external_tools(config.id))
+                    config.cached_tools = tools
+                    config.tool_count = len(tools)
+                    db.commit()
+                    db.refresh(config)
+
                 for t in tools:
                     # 加前缀避免与内部工具重名
                     prefixed_name = f"mcp_{config.id}_{t['name']}"
@@ -85,7 +93,7 @@ def _load_mcp_tools(user_id: Optional[int]) -> Tuple[List[Dict[str, Any]], Dict[
                         },
                     })
                     tool_map[prefixed_name] = config.id
-                logger.info("[Tool Agent] MCP '{}' 加载 {} 个外部工具", config.name, len(tools))
+                logger.info("[Tool Agent] MCP '{}' 加载 {} 个外部工具 (从缓存)", config.name, len(tools))
             except Exception as e:
                 logger.warning("[Tool Agent] MCP '{}' 工具加载失败: {}", config.name, e)
     finally:

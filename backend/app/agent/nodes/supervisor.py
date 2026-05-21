@@ -35,18 +35,26 @@ MAX_ITERATIONS = 5
 
 # ---------- Prompt 模板 ----------
 
-def _build_planning_prompt(has_kb: bool, has_mcp: bool) -> str:
+def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
     """构建任务规划 prompt（首次调用时使用）"""
     capabilities = ", ".join(f"{s['name']}({s['description']})" for s in skill_registry.to_choices_for_router())
 
     kb_section = "- **rag_agent**：从用户关联的知识库中检索文档内容并生成回答。" if has_kb else "- **rag_agent**：不可用（用户未关联知识库）。"
-    mcp_section = "支持文件操作、代码仓库操作等外部工具。" if has_mcp else ""
+
+    # 动态构建 MCP 工具描述
+    if mcp_info:
+        mcp_lines = "；外部工具(MCP)：" + "、".join(
+            f"{m['name']}({m['description']})" if m['description'] else m['name']
+            for m in mcp_info
+        )
+    else:
+        mcp_lines = ""
 
     return f"""你是 NexusAI 的 Supervisor（调度者）。分析用户请求，制定执行计划。
 
 ## 可用子 Agent
 {kb_section}
-- **tool_agent**：执行工具和技能（{capabilities}）。{mcp_section}
+- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}
 - **FINISH**：你自己直接回答，不需要子 Agent。
 
 ## 任务
@@ -87,25 +95,31 @@ def _build_step_check_prompt() -> str:
 
 # ---------- 工具函数 ----------
 
-def _check_mcp_available(user_id: Optional[int]) -> bool:
-    """检查用户是否有可用的 MCP 工具"""
+def _get_mcp_info(user_id: Optional[int]) -> List[Dict[str, str]]:
+    """
+    获取用户配置的 MCP 服务器列表（名称+描述）。
+    返回空列表表示无可用 MCP。
+    """
     if user_id is None:
-        return False
+        return []
     try:
         from app.core.database import SessionLocal
         from app.models.mcp_server import MCPServerConfig
         db = SessionLocal()
         try:
-            count = (
+            configs = (
                 db.query(MCPServerConfig)
                 .filter(MCPServerConfig.created_by == user_id, MCPServerConfig.is_active.is_(True))
-                .count()
+                .all()
             )
-            return count > 0
+            return [
+                {"name": c.name, "description": c.description or ""}
+                for c in configs
+            ]
         finally:
             db.close()
     except Exception:
-        return False
+        return []
 
 
 def _extract_json(text: str) -> Optional[dict]:
@@ -152,7 +166,7 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     context_messages = state.get("context_messages", [])
 
     has_kb = kb_id is not None
-    has_mcp = _check_mcp_available(user_id)
+    mcp_info = _get_mcp_info(user_id)
 
     llm = get_llm_fast()
     node_tokens = 0
@@ -180,7 +194,7 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     # ==========================================================
     if iterations == 0:
         return _planning_phase(
-            state, llm, has_kb, has_mcp, context_messages,
+            state, llm, has_kb, mcp_info, context_messages,
             user_input, token_queue, started_at
         )
 
@@ -196,13 +210,13 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
 # ---------- 规划阶段 ----------
 
 def _planning_phase(
-    state: AgentState, llm, has_kb: bool, has_mcp: bool,
+    state: AgentState, llm, has_kb: bool, mcp_info: List[Dict[str, str]],
     context_messages: List[Dict], user_input: str,
     token_queue, started_at: float
 ) -> Dict[str, Any]:
     """首次调用：LLM 分析请求，生成 task_plan"""
     node_tokens = 0
-    system_prompt = _build_planning_prompt(has_kb, has_mcp)
+    system_prompt = _build_planning_prompt(has_kb, mcp_info)
 
     messages = [
         {"role": "system", "content": system_prompt},

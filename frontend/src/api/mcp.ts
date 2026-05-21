@@ -16,6 +16,8 @@ export interface MCPServerConfig {
   created_by: number
   created_at: string
   updated_at: string
+  tool_count: number
+  cached_tools: MCPToolInfo[] | null
 }
 
 export interface MCPToolInfo {
@@ -30,6 +32,8 @@ export interface MCPServerConfigCreate {
   transport_type: MCPTransportType
   connection_uri: string
   env_vars?: Record<string, string>
+  cached_tools?: MCPToolInfo[]
+  tool_count?: number
 }
 
 export function listMcpServers(): Promise<MCPServerConfig[]> {
@@ -71,9 +75,28 @@ export interface MCPConnectionTestResult {
   tools_count: number
   latency_ms: number
   tools: string[]
+  tools_detail: MCPToolInfo[]
   error: string | null
 }
 
 export function testMcpConnection(payload: MCPConnectionTestRequest): Promise<MCPConnectionTestResult> {
   return request.post('/mcp/servers/test', payload)
+}
+
+export function generateMcpDescription(payload: { server_name: string; tools: MCPToolInfo[] }): Promise<{ description: string }> {
+  return request.post('/mcp/servers/generate-description', payload)
+}
+
+export function refreshMcpTools(id: number): Promise<MCPToolInfo[]> {
+  return request.post(`/mcp/servers/${id}/refresh`)
+}
+
+export interface MCPServerConfigUpdate {
+  name?: string
+  description?: string
+  is_active?: boolean
+}
+
+export function updateMcpServer(id: number, payload: MCPServerConfigUpdate): Promise<MCPServerConfig> {
+  return request.patch(`/mcp/servers/${id}`, payload)
 }

@@ -254,11 +254,17 @@ async def test_connection(
             "[MCP Client] test_connection 成功: {} 个工具, {}ms",
             len(tools), elapsed_ms,
         )
+        # 返回完整工具详情供前端展示和缓存
+        tools_detail = [
+            {"name": t.name, "description": t.description or "", "inputSchema": t.inputSchema}
+            for t in tools
+        ]
         return {
             "ok": True,
             "tools_count": len(tools),
             "latency_ms": elapsed_ms,
             "tools": [t.name for t in tools[:5]],
+            "tools_detail": tools_detail,
             "error": None,
         }
     except Exception as e:
@@ -269,6 +275,47 @@ async def test_connection(
             "tools_count": 0,
             "latency_ms": elapsed_ms,
             "tools": [],
+            "tools_detail": [],
             "error": str(e),
         }
+
+
+async def generate_mcp_description(server_name: str, tools_detail: List[Dict[str, Any]]) -> str:
+    """
+    用 LLM 根据 MCP Server 名称和子工具列表生成简洁的整体描述。
+    该描述将用于 Supervisor 粗粒度选择。
+    """
+    from app.agent.llm import get_llm_fast
+
+    # 构造工具摘要
+    tool_summary = "\n".join(
+        f"- {t['name']}: {t.get('description', '无描述')}"
+        for t in tools_detail[:20]  # 最多取 20 个防止 prompt 过长
+    )
+
+    prompt = f"""根据以下 MCP Server 的名称和它提供的工具列表，生成一句简洁的中文描述（30-80字），说明这个 MCP 服务整体能做什么。
+
+MCP Server 名称：{server_name}
+包含的工具：
+{tool_summary}
+
+要求：
+- 描述应概括这个 MCP 的核心能力
+- 不需要列出具体工具名
+- 使用自然语言，简洁明了
+- 只输出描述文字，不加引号或额外格式"""
+
+    try:
+        llm = get_llm_fast()
+        resp_text, _ = llm.complete_counted(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=150,
+        )
+        return resp_text.strip()
+    except Exception as e:
+        logger.warning("[MCP Client] LLM 生成描述失败: {}", e)
+        # 降级：用工具名拼接
+        tool_names = [t["name"] for t in tools_detail[:5]]
+        return f"提供 {', '.join(tool_names)} 等 {len(tools_detail)} 个工具"
 

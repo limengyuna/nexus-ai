@@ -78,6 +78,21 @@ class MCPServerConfig(Base, TimestampMixin):
         comment="是否启用",
     )
 
+    # 缓存子工具列表（测试连接/刷新时写入）
+    # 格式: [{"name": "...", "description": "...", "inputSchema": {...}}, ...]
+    cached_tools: Mapped[Optional[list]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+        comment="缓存的子工具清单（JSON Array）",
+    )
+
+    tool_count: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False,
+        server_default="0",
+        comment="子工具数量",
+    )
+
     # ---------- 关联关系 ----------
     created_by: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
