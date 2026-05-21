@@ -475,6 +475,11 @@ def _finish_done(
     token_queue, iterations: int, started_at: float, node_tokens: int, reason: str
 ) -> Dict[str, Any]:
     """所有步骤完成，发送 done 信号"""
+    # 把所有剩余的 pending/in_progress 步骤标记为 completed（LLM 判断任务已完成）
+    for step in task_plan:
+        if step.get("status") in ("pending", "in_progress"):
+            step["status"] = "completed"
+
     # 确定最终 intent（取最后一个 completed 步骤的 agent 类型）
     last_agent = ""
     for step in reversed(task_plan):

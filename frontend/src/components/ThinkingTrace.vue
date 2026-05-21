@@ -66,6 +66,17 @@ const hasTaskPlan = computed(() => taskPlan.value.length > 0)
 const completedSteps = computed(() => taskPlan.value.filter((s: any) => s.status === 'completed').length)
 const totalSteps = computed(() => taskPlan.value.length)
 
+// 按步骤分组的工具调用
+const toolCallsByStep = computed(() => {
+  const map: Record<number, any[]> = {}
+  for (const tc of chat.lastToolCalls) {
+    const step = tc.step ?? 0
+    if (!map[step]) map[step] = []
+    map[step].push(tc)
+  }
+  return map
+})
+
 // Token 统计
 const nodeTokens = computed(() => {
   return chat.lastTrace
@@ -219,18 +230,18 @@ function agentBadgeClass(agent: string) {
                 </p>
 
                 <!-- 步骤内嵌：工具调用明细（重磅升级） -->
-                <div v-if="step.agent === 'tool_agent' && chat.lastToolCalls.length > 0" class="mt-2.5 pt-2 border-t border-gray-100 dark:border-gray-800/50">
+                <div v-if="step.agent === 'tool_agent' && (toolCallsByStep[step.step] || []).length > 0" class="mt-2.5 pt-2 border-t border-gray-100 dark:border-gray-800/50">
                   <div 
                     class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
                     @click.stop="toggleStepTools(step.step)"
                   >
                     <component :is="expandedStepTools.has(step.step) ? ChevronDown : ChevronRight" :size="11" />
                     <Wrench :size="11" class="text-purple-500" />
-                    <span>此步骤工具调用 ({{ chat.lastToolCalls.length }} 次)</span>
+                    <span>此步骤工具调用 ({{ (toolCallsByStep[step.step] || []).length }} 次)</span>
                   </div>
                   <div v-if="expandedStepTools.has(step.step)" class="mt-2 space-y-1.5 animate-slide-down">
                     <div 
-                      v-for="(tc, tcIdx) in chat.lastToolCalls" 
+                      v-for="(tc, tcIdx) in toolCallsByStep[step.step] || []" 
                       :key="tcIdx"
                       class="border border-gray-100 dark:border-gray-800/80 rounded-lg p-2.5 bg-white dark:bg-gray-900 shadow-sm"
                     >

@@ -51,6 +51,7 @@ export interface ToolCall {
   kind: string
   arguments: Record<string, any>
   result: any
+  step?: number  // 归属的执行计划步骤编号
 }
 
 export interface RetrievedMemory {

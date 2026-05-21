@@ -51,6 +51,7 @@ class ToolCallRecord(TypedDict, total=False):
     result: Any                  # 执行结果（可截断）
     elapsed_ms: int              # 耗时
     error: Optional[str]
+    step: int                    # 归属的执行计划步骤编号
 
 
 # ---------- 主 State ----------
