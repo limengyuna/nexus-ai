@@ -29,7 +29,7 @@ const newSessionKbId = ref<number | null>(null)
 const showThinking = ref(false)  // 默认折叠，让消息区获得最大可用空间
 const errorMsg = ref('')
 const showSummary = ref(false)
-const sidebarCollapsed = ref(false)
+const sidebarCollapsed = ref(true)
 
 // 会话累计 token
 const sessionTotalTokens = computed(() => {

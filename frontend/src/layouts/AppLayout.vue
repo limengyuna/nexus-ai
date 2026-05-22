@@ -18,6 +18,21 @@ const auth = useAuthStore()
 // 侧栏 hover 展开状态。默认收起为 64px，hover 后浮层展开为 208px，不挤压主内容
 const hovered = ref(false)
 
+// 连点5下 logo 进入隐藏的面试复盘页面
+let logoClickCount = 0
+let logoClickTimer: ReturnType<typeof setTimeout> | null = null
+function handleLogoClick() {
+  logoClickCount++
+  if (logoClickTimer) clearTimeout(logoClickTimer)
+  if (logoClickCount >= 5) {
+    logoClickCount = 0
+    router.push('/interview')
+    return
+  }
+  // 2秒内未达到5次则重置计数
+  logoClickTimer = setTimeout(() => { logoClickCount = 0 }, 2000)
+}
+
 onMounted(async () => {
   if (!auth.userInfo) {
     try {
@@ -64,7 +79,8 @@ const navItems: NavItem[] = [
       <!-- 品牌区 -->
       <div class="h-16 flex items-center px-3 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
         <div
-          class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 text-white flex items-center justify-center font-bold text-base shadow-sm flex-shrink-0"
+          class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 text-white flex items-center justify-center font-bold text-base shadow-sm flex-shrink-0 cursor-pointer select-none"
+          @click="handleLogoClick"
         >
           N
         </div>

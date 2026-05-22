@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from app.api import auth, chat, document, health, knowledge_base, mcp, skill, task, memory
+from app.api import auth, chat, document, health, knowledge_base, mcp, skill, task, memory, internal
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import setup_logging
@@ -102,6 +102,8 @@ app.include_router(chat.router, prefix=API_PREFIX)
 app.include_router(mcp.router, prefix=API_PREFIX)
 app.include_router(skill.router, prefix=API_PREFIX)
 app.include_router(memory.router, prefix=API_PREFIX)
+# 内部工具（面试 QA 导出等）
+app.include_router(internal.router, prefix=API_PREFIX)
 
 
 # ---------- 根路由 ----------

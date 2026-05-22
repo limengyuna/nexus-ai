@@ -54,6 +54,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/MemoryView.vue'),
         meta: { title: '长期记忆' },
       },
+      {
+        path: 'interview',
+        name: 'interview',
+        component: () => import('@/views/InterviewView.vue'),
+        meta: { title: '面试复盘' },
+      },
     ],
   },
   // 404 页面：放在最后，匹配所有未命中的路径
