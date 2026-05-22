@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     """全局应用配置"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # 同时查找根目录和 backend 目录的 .env（后者优先级更高）
+        # 开发模式 CWD=backend/ 时，"../.env" 指向根目录
+        # Docker 模式 CWD=/ 时，".env" 直接找到根目录
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",  # 忽略未定义的环境变量
@@ -62,16 +65,17 @@ class Settings(BaseSettings):
     DEEPSEEK_MODEL_FAST: str = "deepseek-v4-flash"   # 轻型模型：Router、闲聊、RAG 等简单任务
     DEEPSEEK_THINKING_ENABLED: bool = True           # 是否启用 Pro 模型的思考模式（关闭可加速响应）
 
-    # ---------- 阿里通义 Embedding API（后续阶段使用） ----------
+    # ---------- 阿里通义 Embedding / Rerank API ----------
     DASHSCOPE_API_KEY: str = ""
-    EMBEDDING_MODEL: str = "text-embedding-v3"
+    EMBEDDING_MODEL: str = "text-embedding-v4"
+    RERANK_MODEL: str = "gte-rerank-v2"
 
     # ---------- ChromaDB（通过 HTTP 客户端连接 Docker 中的 Chroma Server） ----------
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
 
     # ---------- Embedding 配置 ----------
-    # 通义 text-embedding-v3 的向量维度为 1024（默认）
+    # 通义 text-embedding-v4 的向量维度为 1024（默认）
     EMBEDDING_DIM: int = 1024
     # 当 DASHSCOPE_API_KEY 为空时自动回退到 Mock Embedder（开发友好）
     EMBEDDING_PROVIDER: str = "auto"  # auto / tongyi / mock

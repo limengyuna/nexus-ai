@@ -77,6 +77,16 @@ const toolCallsByStep = computed(() => {
   return map
 })
 
+// Parent-Child 回溯统计（从 rag_agent 的 output_summary 中提取）
+const parentMergedCount = computed(() => {
+  const ragStep = chat.lastTrace.find((s: any) => s.node === 'rag_agent')
+  return ragStep?.output?.parent_merged ?? 0
+})
+const effectiveHitsCount = computed(() => {
+  const ragStep = chat.lastTrace.find((s: any) => s.node === 'rag_agent')
+  return ragStep?.output?.effective_hits ?? chat.lastRetrievedDocs.length
+})
+
 // Token 统计
 const nodeTokens = computed(() => {
   return chat.lastTrace
@@ -276,6 +286,10 @@ function agentBadgeClass(agent: string) {
                     <component :is="expandedStepDocs.has(step.step) ? ChevronDown : ChevronRight" :size="11" />
                     <BookOpen :size="11" class="text-blue-500" />
                     <span>此步骤检索知识 ({{ chat.lastRetrievedDocs.length }} 段)</span>
+                    <!-- Parent-Child 回溯标记 -->
+                    <span v-if="parentMergedCount > 0" class="ml-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] font-medium">
+                      父块回溯 -{{ parentMergedCount }}
+                    </span>
                   </div>
                   <div v-if="expandedStepDocs.has(step.step)" class="mt-2 space-y-1.5 animate-slide-down">
                     <div 
@@ -344,6 +358,9 @@ function agentBadgeClass(agent: string) {
           <BookOpen :size="12" />
           全局知识检索
           <span class="text-gray-400 dark:text-gray-500 font-normal">({{ chat.lastRetrievedDocs.length }} 段)</span>
+          <span v-if="parentMergedCount > 0" class="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] font-medium">
+            父块回溯合并 → 实际 {{ effectiveHitsCount }} 段送入 LLM
+          </span>
         </div>
         <div class="space-y-2">
           <div
@@ -359,6 +376,7 @@ function agentBadgeClass(agent: string) {
               <span class="text-xs font-medium" :class="doc.adopted !== false ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'">
                 #{{ i + 1 }} {{ doc.metadata?.file_name || '未知来源' }}
                 <span v-if="doc.adopted === false" class="ml-1 text-gray-400 dark:text-gray-500">(未采用)</span>
+                <span v-if="doc.metadata?.parent_content" class="ml-1 px-1 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded text-[9px] font-medium">子块</span>
               </span>
               <div class="flex items-center gap-2">
                 <span class="text-[10px]" :class="doc.adopted !== false ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'">{{ doc.score?.toFixed(4) }}</span>
@@ -372,6 +390,15 @@ function agentBadgeClass(agent: string) {
                 { 'line-clamp-3': !expandedDocs.has(i) }
               ]"
             >{{ doc.content }}</p>
+            <!-- 子块的 Parent 内容折叠区 -->
+            <details v-if="expandedDocs.has(i) && doc.metadata?.parent_content" class="mt-1.5" @click.stop>
+              <summary class="text-[10px] text-amber-600 dark:text-amber-400 cursor-pointer hover:underline select-none">
+                查看完整父块（{{ doc.metadata.parent_content.length }} 字符）
+              </summary>
+              <p class="mt-1 text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed whitespace-pre-wrap break-words bg-amber-50/50 dark:bg-amber-900/10 rounded p-2 max-h-40 overflow-y-auto">
+                {{ doc.metadata.parent_content }}
+              </p>
+            </details>
           </div>
         </div>
       </section>

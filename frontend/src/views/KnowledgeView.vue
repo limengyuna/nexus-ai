@@ -24,8 +24,6 @@ const createForm = ref({
   name: '',
   description: '',
   chunk_strategy: 'recursive' as 'recursive' | 'markdown' | 'semantic',
-  chunk_size: 500,
-  chunk_overlap: 50,
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -134,7 +132,7 @@ async function handleCreate() {
   try {
     const created = await kb.createKnowledgeBase({ ...createForm.value })
     showCreateModal.value = false
-    createForm.value = { name: '', description: '', chunk_strategy: 'recursive', chunk_size: 500, chunk_overlap: 50 }
+    createForm.value = { name: '', description: '', chunk_strategy: 'recursive' }
     await selectKb(created.id)
     toast.success(`知识库“${created.name}”创建成功`)
   } catch (e: any) {
@@ -349,12 +347,12 @@ function statusLabel(s: string): string {
             @click="triggerFileSelect"
           >
             <Upload :size="16" :stroke-width="2" />
-            <span>上传文档（支持 PDF / Docx / MD / TXT）</span>
+            <span>上传文档</span>
           </button>
           <input
             ref="fileInput"
             type="file"
-            accept=".pdf,.docx,.md,.txt"
+            accept=".pdf,.docx,.doc,.md,.txt,.pptx,.ppt,.xlsx,.xls,.csv,.html,.htm,.xml,.json,.rtf,.odt"
             multiple
             class="hidden"
             @change="handleFileChange"
@@ -515,25 +513,6 @@ function statusLabel(s: string): string {
         </select>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-medium text-gray-700 mb-1">chunk_size</label>
-          <input
-            v-model.number="createForm.chunk_size"
-            type="number"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 mb-1">chunk_overlap</label>
-          <input
-            v-model.number="createForm.chunk_overlap"
-            type="number"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-        </div>
-      </div>
-
       <div class="flex justify-end gap-2 pt-2">
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="showCreateModal = false">取消</button>
         <button
@@ -576,7 +555,7 @@ function statusLabel(s: string): string {
 
       <div class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 px-3 py-2 rounded-lg flex items-start gap-2">
         <Info :size="14" :stroke-width="2" class="flex-shrink-0 mt-0.5 text-gray-400 dark:text-gray-500" />
-        <span>提示：分块策略 / chunk_size / overlap 创建后不建议修改（已上传的文档不会按新参数重新切分）。如确需更换，建议新建一个知识库重新上传。</span>
+        <span>提示：分块策略创建后不可修改（已上传的文档不会按新策略重新切分）。如确需更换，建议新建一个知识库重新上传。</span>
       </div>
 
       <div class="flex justify-end gap-2 pt-2">
@@ -642,10 +621,20 @@ function statusLabel(s: string): string {
                 <span v-if="c.metadata?.header_path" class="ml-2 text-blue-600 dark:text-blue-400">
                   📑 {{ c.metadata.header_path }}
                 </span>
+                <span v-if="c.metadata?.parent_content" class="ml-2 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded text-[10px] font-medium">
+                  子块
+                </span>
               </span>
               <span class="text-xs text-gray-400 dark:text-gray-500">{{ c.content.length }} 字符</span>
             </div>
             <pre class="px-3 py-2.5 text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap break-words font-sans bg-white dark:bg-gray-900">{{ c.content }}</pre>
+            <!-- Parent 完整内容（可折叠） -->
+            <details v-if="c.metadata?.parent_content" class="border-t border-gray-100 dark:border-gray-800">
+              <summary class="px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20 select-none">
+                查看完整父块（{{ c.metadata.parent_content.length }} 字符）
+              </summary>
+              <pre class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed whitespace-pre-wrap break-words font-sans bg-amber-50/50 dark:bg-amber-900/10">{{ c.metadata.parent_content }}</pre>
+            </details>
           </div>
         </div>
       </div>

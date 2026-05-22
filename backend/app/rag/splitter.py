@@ -116,7 +116,7 @@ class MarkdownHeaderSplitter(BaseSplitter):
         self.chunk_overlap = chunk_overlap
 
     def split(self, text: str) -> List[Chunk]:
-        # 第一阶段：按标题切分
+        # 第一阶段：按标题切分（得到 parent 级别的块）
         md_docs = self._md_splitter.split_text(text)
 
         chunks: List[Chunk] = []
@@ -126,24 +126,31 @@ class MarkdownHeaderSplitter(BaseSplitter):
             header_path = " > ".join(
                 str(v) for k, v in md_doc.metadata.items() if k.startswith("h")
             )
+            parent_content = md_doc.page_content
 
-            # 第二阶段：对长块再用递归切分
-            sub_pieces = self._sub_splitter.split_text(md_doc.page_content)
+            # 第二阶段：对长块再用递归切分（得到 child 级别的块）
+            sub_pieces = self._sub_splitter.split_text(parent_content)
+            
+            # Parent-Child 逻辑：
+            # 如果 parent 被切成多个 child，每个 child 记录 parent_content
+            # 检索时用 child 匹配，返回时回溯到 parent 保证上下文完整
+            has_children = len(sub_pieces) > 1
+            
             for piece in sub_pieces:
-                chunks.append(
-                    Chunk(
-                        content=piece,
-                        metadata={
-                            "chunk_index": chunk_idx,
-                            "strategy": "markdown_header",
-                            "header_path": header_path or "(no-header)",
-                        },
-                    )
-                )
+                metadata = {
+                    "chunk_index": chunk_idx,
+                    "strategy": "markdown_header",
+                    "header_path": header_path or "(no-header)",
+                }
+                # 只有被切分的块才记录 parent_content（单块不需要）
+                if has_children:
+                    metadata["parent_content"] = parent_content
+                
+                chunks.append(Chunk(content=piece, metadata=metadata))
                 chunk_idx += 1
 
         logger.info(
-            "MarkdownHeaderSplitter 切分完成: {} 字符 -> {} 块",
+            "MarkdownHeaderSplitter 切分完成: {} 字符 -> {} 块 (parent-child 启用)",
             len(text), len(chunks),
         )
         return chunks
@@ -312,23 +319,43 @@ class SemanticSplitter(BaseSplitter):
         return chunks
 
 
+# ---------- 策略默认参数配置 ----------
+STRATEGY_DEFAULTS = {
+    ChunkStrategy.RECURSIVE: {"chunk_size": 500, "chunk_overlap": 50},
+    ChunkStrategy.MARKDOWN_HEADER: {"chunk_size": 800, "chunk_overlap": 80},
+    ChunkStrategy.SEMANTIC: {"chunk_size": 800, "chunk_overlap": 80},
+}
+
+
+def get_strategy_defaults(strategy: ChunkStrategy) -> dict:
+    """获取指定策略的默认参数"""
+    return STRATEGY_DEFAULTS.get(strategy, {"chunk_size": 500, "chunk_overlap": 50})
+
+
 # ---------- 工厂函数 ----------
 def get_splitter(
     strategy: ChunkStrategy,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
 ) -> BaseSplitter:
     """
     根据策略类型返回对应的 Splitter 实例
+    
+    参数优先级：传入值 > 策略默认值
 
     :param strategy: 分块策略枚举（来自 KnowledgeBase.chunk_strategy）
-    :param chunk_size: 分块大小
-    :param chunk_overlap: 分块重叠
+    :param chunk_size: 分块大小（可选，不传则使用策略默认值）
+    :param chunk_overlap: 分块重叠（可选，不传则使用策略默认值）
     """
+    # 使用策略默认值
+    defaults = get_strategy_defaults(strategy)
+    size = chunk_size if chunk_size is not None else defaults["chunk_size"]
+    overlap = chunk_overlap if chunk_overlap is not None else defaults["chunk_overlap"]
+    
     if strategy == ChunkStrategy.RECURSIVE:
-        return RecursiveSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        return RecursiveSplitter(chunk_size=size, chunk_overlap=overlap)
     if strategy == ChunkStrategy.MARKDOWN_HEADER:
-        return MarkdownHeaderSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        return MarkdownHeaderSplitter(chunk_size=size, chunk_overlap=overlap)
     if strategy == ChunkStrategy.SEMANTIC:
-        return SemanticSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        return SemanticSplitter(chunk_size=size, chunk_overlap=overlap)
     raise ValueError(f"未知的分块策略: {strategy}")
