@@ -26,9 +26,9 @@ from app.rag.reranker import get_reranker
 from app.rag.vector_store import get_vector_store
 
 # 初始粗召回数量（送入 Reranker 的候选数）
-RETRIEVAL_TOP_K = 10
+RETRIEVAL_TOP_K = 15
 # Reranker 重排后取的最终数量（送给 LLM）
-RERANK_TOP_N = 5
+RERANK_TOP_N = 6
 
 # 软过滤阈值：余弦距离超过此值的 chunk 视为低相关度
 # ChromaDB 返回的 score 为余弦距离（越小越相关，范围 0~2）
