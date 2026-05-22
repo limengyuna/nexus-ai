@@ -509,7 +509,7 @@ function statusLabel(s: string): string {
         >
           <option value="recursive">recursive（通用递归字符切分）</option>
           <option value="markdown">markdown（按标题层级切分，保留语义结构）</option>
-          <option value="semantic">semantic（基于 Embedding 余弦距离的语义跳变切分，质量最高但慢）</option>
+          <option value="semantic">semantic（基于 Embedding 语义跳变切分，适合无明确结构的长文本，较慢）</option>
         </select>
       </div>
 
