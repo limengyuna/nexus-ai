@@ -24,6 +24,7 @@ const createForm = ref({
   name: '',
   description: '',
   chunk_strategy: 'recursive' as 'recursive' | 'markdown' | 'semantic',
+  enable_llm_clean: false,
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -132,7 +133,7 @@ async function handleCreate() {
   try {
     const created = await kb.createKnowledgeBase({ ...createForm.value })
     showCreateModal.value = false
-    createForm.value = { name: '', description: '', chunk_strategy: 'recursive' }
+    createForm.value = { name: '', description: '', chunk_strategy: 'recursive', enable_llm_clean: false }
     await selectKb(created.id)
     toast.success(`知识库“${created.name}”创建成功`)
   } catch (e: any) {
@@ -165,21 +166,61 @@ function triggerFileSelect() {
   fileInput.value?.click()
 }
 
-async function handleFileChange(e: Event) {
+// ---------- 上传策略选择弹窗 ----------
+// 用户选完文件先弹窗选策略（'default' 表示沿用 KB 默认）；确认后才真正开始上传
+const showUploadStrategyModal = ref(false)
+const pendingUploadFiles = ref<File[]>([])
+const pendingUploadStrategy = ref<'default' | 'recursive' | 'markdown' | 'semantic'>('default')
+// LLM 清洗三态：'default' 沿用 KB 默认；'on' 显式开启；'off' 显式关闭
+const pendingUploadLlmClean = ref<'default' | 'on' | 'off'>('default')
+
+function handleFileChange(e: Event) {
   const target = e.target as HTMLInputElement
   if (!target.files || !activeKbId.value) return
   const files = Array.from(target.files)
   // 重置 input 以便同名文件可重复上传
   target.value = ''
+  if (files.length === 0) return
+
+  // 暂存文件并打开策略选择弹窗
+  pendingUploadFiles.value = files
+  pendingUploadStrategy.value = 'default'
+  pendingUploadLlmClean.value = 'default'
+  showUploadStrategyModal.value = true
+}
+
+async function confirmUploadWithStrategy() {
+  if (!activeKbId.value || pendingUploadFiles.value.length === 0) {
+    showUploadStrategyModal.value = false
+    return
+  }
+  const files = pendingUploadFiles.value
+  // 'default' 不传策略 → 后端沿用 KB 默认；否则按用户选择覆盖
+  const strategyOverride =
+    pendingUploadStrategy.value === 'default' ? undefined : pendingUploadStrategy.value
+  // LLM 清洗三态：default → undefined（沿用 KB），on → true，off → false
+  const llmCleanOverride =
+    pendingUploadLlmClean.value === 'default'
+      ? undefined
+      : pendingUploadLlmClean.value === 'on'
+  // 关闭弹窗并清理暂存
+  showUploadStrategyModal.value = false
+  pendingUploadFiles.value = []
 
   for (const file of files) {
     const trackItem: { name: string; progress: number; status: string; error?: string } = { name: file.name, progress: 0, status: 'pending' }
     uploadingFiles.value.push(trackItem)
     try {
-      await kb.uploadDocument(activeKbId.value, file, (task: TaskRecord) => {
-        trackItem.progress = task.progress
-        trackItem.status = task.status
-      })
+      await kb.uploadDocument(
+        activeKbId.value,
+        file,
+        (task: TaskRecord) => {
+          trackItem.progress = task.progress
+          trackItem.status = task.status
+        },
+        strategyOverride,
+        llmCleanOverride,
+      )
     } catch (e: any) {
       trackItem.status = 'failed'
       trackItem.error = e?.message
@@ -196,6 +237,11 @@ async function handleFileChange(e: Event) {
   }
   // 刷新 KB 列表以更新 document_count
   await kb.fetchKnowledgeBases()
+}
+
+function cancelUploadStrategy() {
+  showUploadStrategyModal.value = false
+  pendingUploadFiles.value = []
 }
 
 async function handleReprocessDoc(doc: DocumentItem) {
@@ -513,6 +559,23 @@ function statusLabel(s: string): string {
         </select>
       </div>
 
+      <!-- LLM 文档清洗开关（可选预处理层） -->
+      <div class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-lg">
+        <input
+          id="enable-llm-clean"
+          v-model="createForm.enable_llm_clean"
+          type="checkbox"
+          class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+        />
+        <label for="enable-llm-clean" class="flex-1 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+          <span class="font-medium block mb-0.5">启用 LLM 文档清洗（实验性）</span>
+          <span class="text-gray-500 dark:text-gray-400 leading-relaxed">
+            上传时额外调用 LLM 将格式混乱的 PDF 重排为标准 Markdown，提升分块质量。
+            含 5 道防线防止内容被篡改。仅对本知识库生效，会增加 token 消耗和上传处理时间。
+          </span>
+        </label>
+      </div>
+
       <div class="flex justify-end gap-2 pt-2">
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="showCreateModal = false">取消</button>
         <button
@@ -566,6 +629,94 @@ function statusLabel(s: string): string {
           @click="handleSaveEdit"
         >
           保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 上传文档：分块策略选择弹窗 -->
+  <!-- 选完文件后弹出此弹窗，允许为本次上传的所有文件统一选择一个分块策略；不选则沿用 KB 默认 -->
+  <div
+    v-if="showUploadStrategyModal"
+    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+    @click.self="cancelUploadStrategy"
+  >
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-[30rem] space-y-3">
+      <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">选择分块策略</h3>
+      <p class="text-xs text-gray-500 dark:text-gray-400">
+        将为以下 <span class="font-medium text-gray-700 dark:text-gray-200">{{ pendingUploadFiles.length }}</span> 个文件统一应用分块策略。<br />
+        不同类型的文档建议使用不同策略以获得更好的检索效果。
+      </p>
+
+      <!-- 文件列表（折叠展示，最多 3 行） -->
+      <div class="max-h-24 overflow-y-auto bg-gray-50 dark:bg-gray-800/60 rounded-lg p-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+        <div v-for="f in pendingUploadFiles" :key="f.name" class="truncate" :title="f.name">
+          · {{ f.name }}
+        </div>
+      </div>
+
+      <!-- 分块策略单选 -->
+      <div class="space-y-1">
+        <div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">分块策略</div>
+        <label
+          v-for="opt in [
+            { value: 'default', title: '沿用知识库默认', desc: '使用当前知识库创建时设置的分块策略' },
+            { value: 'recursive', title: 'recursive', desc: '通用递归字符切分，适用于任何文档（兜底）' },
+            { value: 'markdown', title: 'markdown', desc: '按 # 标题层级切分，保留语义结构（推荐论文、法律、技术文档）' },
+            { value: 'semantic', title: 'semantic', desc: '基于 Embedding 语义跳变切分，适合无明确标题的长文本（如对话、小说），较慢' },
+          ]"
+          :key="opt.value"
+          class="flex items-start gap-2 p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
+          :class="{ 'border-primary-500 bg-primary-50 dark:bg-primary-900/20': pendingUploadStrategy === opt.value }"
+        >
+          <input
+            v-model="pendingUploadStrategy"
+            type="radio"
+            :value="opt.value"
+            class="mt-0.5 h-4 w-4 text-primary-600 focus:ring-primary-500"
+          />
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-100">{{ opt.title }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ opt.desc }}</div>
+          </div>
+        </label>
+      </div>
+
+      <!-- LLM 清洗三态 -->
+      <div class="space-y-1 pt-1">
+        <div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          LLM 文档清洗
+          <span class="text-gray-400 dark:text-gray-500 font-normal">（实验性 · 提升伪 Markdown 结构识别）</span>
+        </div>
+        <div class="flex gap-2">
+          <label
+            v-for="opt in [
+              { value: 'default', title: '沿用知识库默认' },
+              { value: 'on', title: '启用' },
+              { value: 'off', title: '禁用' },
+            ]"
+            :key="opt.value"
+            class="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors text-xs"
+            :class="{ 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 font-medium text-primary-700 dark:text-primary-300': pendingUploadLlmClean === opt.value }"
+          >
+            <input
+              v-model="pendingUploadLlmClean"
+              type="radio"
+              :value="opt.value"
+              class="h-3.5 w-3.5 text-primary-600 focus:ring-primary-500"
+            />
+            <span>{{ opt.title }}</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button class="px-4 py-1.5 text-sm text-gray-600" @click="cancelUploadStrategy">取消</button>
+        <button
+          class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          @click="confirmUploadWithStrategy"
+        >
+          开始上传
         </button>
       </div>
     </div>

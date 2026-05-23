@@ -77,8 +77,8 @@ if not exist "backend\.venv\Scripts\activate.bat" (
 REM 启动 Backend
 start "NexusAI-Backend" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port 8002 --reload"
 
-REM 启动 Celery Worker
-start "NexusAI-Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && celery -A app.tasks.celery_app worker --loglevel=info --pool=solo"
+REM 启动 Celery Worker（threads 池 + 4 并发，适合 I/O 密集型任务如 LLM/Embedding API 调用）
+start "NexusAI-Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && celery -A app.tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4"
 
 echo  [OK] 后端 + Celery Worker 已在新窗口启动
 
@@ -138,7 +138,7 @@ taskkill /FI "WINDOWTITLE eq NexusAI-Celery*" /F >nul 2>&1
 powershell -NoProfile -Command "Start-Sleep -Seconds 1"
 
 start "NexusAI-Backend" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port 8002 --reload"
-start "NexusAI-Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && celery -A app.tasks.celery_app worker --loglevel=info --pool=solo"
+start "NexusAI-Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && celery -A app.tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4"
 
 echo  [OK] 后端 + Celery Worker 已重启
 echo.

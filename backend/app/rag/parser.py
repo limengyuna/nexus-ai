@@ -26,33 +26,128 @@ class DocumentParseError(RuntimeError):
     """文档解析失败时抛出"""
 
 
+# ---------- 启发式：判断 Unstructured 的 Title 是否真的是标题 ----------
+# 中文 / 英文句末标点（用于判断是否为完整句子）
+_SENTENCE_END_PUNCT = "。！？；.!?;"
+# 中文括号编号子项（如 "（一）"、"（二）"），属于条款内的列举项，不是标题
+_CN_ENUM_ITEM_RE = re.compile(r"^[（(][一二三四五六七八九十百零\d]+[）)]")
+# 多级数字编号（1.1 / 1.1.1 / 1.1.1.1），至少含一个点，避免误匹配列表项（如 "1.活动"）。
+# 常见于学术论文 / 技术文档（如 "4.3 数据库设计"、"4.3.1 E-R 图"）。
+_NUM_HEADING_RE = re.compile(r"^\d+\.\d+(?:\.\d+){0,2}\s*\S")
+
+
+def _is_likely_real_title(text: str, max_len: int = 50) -> bool:
+    """
+    启发式判断一段文本是否为"真标题"
+
+    背景：Unstructured 在中文 PDF 上 Title 分类不准，常把粗体段落、行首带数字
+    编号的段落、甚至字号稍大的正文都判为 Title，导致分块过度碎片化。
+
+    判定规则（按优先级）：
+      1. 长度兜底：超过 max_len 字符一定不是标题
+      2. 强信号：匹配中文章节模式（第X编/章/节）→ 真标题
+      3. 强信号：匹配数字层级（1. / 1.1 / 1.1.1）→ 真标题
+      4. 排除项：以中文括号编号开头（（一）（二））→ 是列举项不是标题
+      5. 弱信号：短行（< 30 字）且不以句末标点结尾 → 视为标题
+      6. 其他默认：当作正文处理
+    """
+    stripped = text.strip()
+    if not stripped or len(stripped) > max_len:
+        return False
+
+    # 强信号：中文章节关键字
+    if (_CN_CHAPTER_RE.match(stripped) or
+            _CN_SECTION_H1_RE.match(stripped) or
+            _CN_SECTION_H2_RE.match(stripped)):
+        return True
+
+    # 强信号：数字层级编号
+    if _NUM_HEADING_RE.match(stripped):
+        return True
+
+    # 排除项：（一）（二）这种条款内列举项
+    if _CN_ENUM_ITEM_RE.match(stripped):
+        return False
+
+    # 弱信号：短行 + 不以句末标点结尾
+    if len(stripped) < 30 and stripped[-1] not in _SENTENCE_END_PUNCT:
+        # 进一步排除：含多个逗号的多半是不完整句子片段，非标题
+        if stripped.count("，") + stripped.count(",") <= 1:
+            return True
+
+    return False
+
+
+def _get_chinese_title_depth(text: str) -> int | None:
+    """
+    根据标题模式返回深度。返回值与 Markdown 前缀对应关系：
+      0 → #   (h1)
+      1 → ##  (h2)
+      2 → ### (h3)
+
+    层级映射（平衡 「中文章节 + 数字层级」 混合文档，避免同级冲突）：
+      第X编 → # (h1)        编与章同级，编被章覆盖是可接受损失
+      第X章 → # (h1)        让「第4章 系统设计」与「4.3 数据库设计」不同级
+      第X节 → ## (h2)       与 X.Y 同级（实际语义也是子小节）
+      X.Y → ## (h2)
+      X.Y.Z 及以上 → ### (h3)
+    匹配不到返回 None，调用方使用默认深度。
+    """
+    stripped = text.strip()
+    if _CN_CHAPTER_RE.match(stripped):
+        return 0  # 编
+    if _CN_SECTION_H1_RE.match(stripped):
+        return 0  # 章（与编同级，冲突量低）
+    if _CN_SECTION_H2_RE.match(stripped):
+        return 1  # 节
+    # 数字层级 1.1 / 1.1.1
+    m = _NUM_HEADING_RE.match(stripped)
+    if m:
+        head = stripped.split(maxsplit=1)[0].rstrip("、.")
+        dots = head.count(".")
+        # 1 dot → 1 (h2), 2+ dots → 2 (h3)
+        return 1 if dots == 1 else 2
+    return None
+
+
 # ---------- Unstructured 元素转 Markdown ----------
 def _elements_to_markdown(elements: List) -> str:
     """
     将 unstructured 的 Element 列表转换为 Markdown 格式文本
-    
+
     元素类型映射：
-    - Title → # 标题（根据层级深度决定 # 数量）
+    - Title → 经启发式过滤后才加 # 前缀（避免中文 PDF 误识别）
     - NarrativeText → 普通段落
     - ListItem → - 列表项
     - Table → Markdown 表格
     - 其他 → 普通文本
     """
     lines: List[str] = []
-    
+    fake_title_count = 0  # 统计被启发式过滤掉的伪标题数（用于日志观察）
+
     for elem in elements:
         elem_type = type(elem).__name__
         text = str(elem).strip()
-        
+
         if not text:
             continue
-        
+
         if elem_type == "Title":
-            # 根据元数据中的 category_depth 决定标题层级，默认 1 级
-            depth = getattr(elem.metadata, "category_depth", 0) or 0
-            prefix = "#" * min(max(depth + 1, 1), 4)  # 限制在 1-4 级
-            lines.append(f"{prefix} {text}")
-        
+            # 启发式判定：是真标题才加 # 前缀，否则降级为正文
+            if _is_likely_real_title(text):
+                # 优先用中文章节模式确定层级，其次用 Unstructured 的 category_depth
+                cn_depth = _get_chinese_title_depth(text)
+                if cn_depth is not None:
+                    depth = cn_depth
+                else:
+                    depth = getattr(elem.metadata, "category_depth", 0) or 0
+                prefix = "#" * min(max(depth + 1, 1), 4)  # 限制在 1-4 级
+                lines.append(f"{prefix} {text}")
+            else:
+                # 伪标题降级为普通段落，避免下游分块过度碎片化
+                fake_title_count += 1
+                lines.append(text)
+
         elif elem_type == "ListItem":
             lines.append(f"- {text}")
         
@@ -109,6 +204,8 @@ def _html_table_to_markdown(html: str) -> str:
 _CN_CHAPTER_RE = re.compile(r"^(第[一二三四五六七八九十百零\d]+编)\s*(.*)$")
 _CN_SECTION_H1_RE = re.compile(r"^(第[一二三四五六七八九十百零\d]+章)\s*(.*)$")
 _CN_SECTION_H2_RE = re.compile(r"^(第[一二三四五六七八九十百零\d]+节)\s*(.*)$")
+# 注意："第X条" 不再当作 Markdown 标题（避免单条粒度切分导致碎片化），
+# 而是作为正文内容保留，依赖最小块合并将多个连续短条款聚合到同一块。
 _CN_ARTICLE_RE = re.compile(r"^(第[一二三四五六七八九十百零\d]+条)\s*(.*)$")
 # 触发检测的模式：文本中至少出现 3 个"第X章"或"第X条"
 _CN_TRIGGER_RE = re.compile(r"第[一二三四五六七八九十百零\d]+[章条]")
@@ -146,27 +243,37 @@ def _enhance_chinese_headings(text: str) -> str:
         
         # 只处理短行（真正的标题通常 < 30 字）
         if len(stripped) < 30:
-            # 按优先级匹配：编 > 章 > 节 > 条
+            # 按优先级匹配：编 > 章 > 节 > X.Y[.Z]（条不作为标题，保留为内容）
+            # 层级映射与 _get_chinese_title_depth 保持一致：
+            #   编/章 → # (h1)， 节 → ## (h2)
+            #   X.Y → ## (h2)， X.Y.Z+ → ### (h3)
             m = _CN_CHAPTER_RE.match(stripped)
             if m:
                 processed.append(f"# {m.group(1)} {m.group(2)}".strip())
                 continue
-            
+
             m = _CN_SECTION_H1_RE.match(stripped)
             if m:
                 processed.append(f"# {m.group(1)} {m.group(2)}".strip())
                 continue
-            
+
             m = _CN_SECTION_H2_RE.match(stripped)
             if m:
                 processed.append(f"## {m.group(1)} {m.group(2)}".strip())
                 continue
-            
-            m = _CN_ARTICLE_RE.match(stripped)
+
+            # 数字层级（1.1 / 1.1.1）—— 补偿 Unstructured 未识别为 Title 的伪标题
+            m = _NUM_HEADING_RE.match(stripped)
             if m:
-                processed.append(f"### {m.group(1)} {m.group(2)}".strip())
+                head = stripped.split(maxsplit=1)[0].rstrip("、.")
+                dots = head.count(".")
+                prefix = "##" if dots == 1 else "###"
+                processed.append(f"{prefix} {stripped}")
                 continue
-        
+
+            # "第X条" 不升级为标题：法律条款数量极多，单条作标题会导致分块碎片化，
+            # 让 splitter 在「章 / 节」层级切分，再由最小块合并将连续短条款聚合
+
         processed.append(stripped)
     
     return "\n".join(processed)
@@ -201,12 +308,12 @@ def _parse_with_unstructured(file_path: Path) -> str:
         if not elements:
             raise DocumentParseError(f"文档解析结果为空: {file_path}")
         
-        # 转换为 Markdown 格式
+        # 转换为 Markdown 格式（含 Title 启发式过滤）
         markdown_text = _elements_to_markdown(elements)
-        
+
         # 中文标题检测增强（补偿 Unstructured 对中文标题的识别不足）
         markdown_text = _enhance_chinese_headings(markdown_text)
-        
+
         logger.info(
             "Unstructured 解析完成: {} -> {} 个元素 -> {} 字符",
             file_path.name, len(elements), len(markdown_text)

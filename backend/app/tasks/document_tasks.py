@@ -69,12 +69,51 @@ def process_document(self, document_id: int, task_record_id: int) -> dict:
         # ---------- 阶段 2：解析 ----------
         logger.info("[Task] 解析文档 {} ({})", document.file_name, document.file_path)
         text = parse_document(document.file_path)
+        TaskService.update_progress(db, task_record_id, progress=20)
+
+        # ---------- 阶段 2.5（可选）：LLM 清洗 ----------
+        # 启用后会调用 LLM 把"伪 Markdown"重排为标准 Markdown，
+        # 失败的段落自动回退原文，保证主管道不会因 LLM 问题中断
+        # 文档级开关优先；为 None 则回退 KB 默认
+        effective_enable_llm_clean = (
+            document.enable_llm_clean
+            if document.enable_llm_clean is not None
+            else kb.enable_llm_clean
+        )
+        if effective_enable_llm_clean:
+            logger.info(
+                "[Task] 启用 LLM 清洗 document_id={}（doc={}, kb={}）",
+                document_id, document.enable_llm_clean, kb.enable_llm_clean,
+            )
+            try:
+                from app.rag.cleaner import clean_document_with_llm
+                text_before = len(text)
+                text = clean_document_with_llm(text)
+                logger.info(
+                    "[Task] LLM 清洗完成 document_id={} {}→{} 字符",
+                    document_id, text_before, len(text),
+                )
+            except Exception as e:
+                # 整体清洗失败时降级到启发式版（不阻断主管道）
+                logger.warning(
+                    "[Task] LLM 清洗整体失败 document_id={}，沿用启发式解析结果: {}",
+                    document_id, e,
+                )
         TaskService.update_progress(db, task_record_id, progress=30)
 
         # ---------- 阶段 3：分块 ----------
         DocumentService.update_status(db, document_id, DocumentStatus.CHUNKING)
+        # 文档级策略优先；为空则回退 KB 默认。size/overlap 始终用 KB 配置。
+        effective_strategy = document.chunk_strategy or kb.chunk_strategy
+        logger.info(
+            "[Task] 分块策略选择 document_id={}: doc.chunk_strategy={}, kb.chunk_strategy={}, 实际使用={}",
+            document_id,
+            document.chunk_strategy.value if document.chunk_strategy else None,
+            kb.chunk_strategy.value,
+            effective_strategy.value,
+        )
         splitter = get_splitter(
-            strategy=kb.chunk_strategy,
+            strategy=effective_strategy,
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,
         )

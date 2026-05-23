@@ -4,6 +4,7 @@
 import enum
 from typing import TYPE_CHECKING, List, Optional
 
+from sqlalchemy import Boolean
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -63,6 +64,17 @@ class KnowledgeBase(Base, TimestampMixin):
         default=50,
         nullable=False,
         comment="分块重叠（字符数）",
+    )
+
+    # ---------- LLM 文档清洗开关 ----------
+    # 启用后，文档解析阶段会额外调用 LLM 把"伪 Markdown"重排为结构清晰的标准 Markdown，
+    # 适合扫描版 / 格式混乱的中文 PDF；对结构已清晰的文档帮助不大且增加 token 成本。
+    enable_llm_clean: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false",
+        comment="是否启用 LLM 文档清洗（可选预处理层）",
     )
 
     # ---------- 向量集合标识 ----------

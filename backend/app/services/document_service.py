@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.document import Document, DocumentStatus
-from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_base import ChunkStrategy, KnowledgeBase
 from app.models.task import TaskRecord, TaskStatus, TaskType
 from app.rag.parser import DocumentParser
 from app.rag.vector_store import get_vector_store
@@ -42,10 +42,14 @@ class DocumentService:
         db: Session,
         kb: KnowledgeBase,
         upload_file: UploadFile,
+        chunk_strategy: Optional[ChunkStrategy] = None,
+        enable_llm_clean: Optional[bool] = None,
     ) -> tuple[Document, TaskRecord]:
         """
         上传文件，登记 Document + 创建 TaskRecord，并触发 Celery 任务
 
+        :param chunk_strategy: 文档级分块策略；不传则沿用 KB 默认
+        :param enable_llm_clean: 文档级 LLM 清洗开关；不传则沿用 KB 默认
         :return: (Document, TaskRecord)
         :raises ValueError: 文件类型不支持 / 文件超限
         """
@@ -86,6 +90,8 @@ class DocumentService:
             file_size=file_size,
             file_path=str(save_path),
             status=DocumentStatus.PENDING,
+            chunk_strategy=chunk_strategy,        # 可为 None：处理时回退 KB 默认
+            enable_llm_clean=enable_llm_clean,    # 可为 None：处理时回退 KB 默认
         )
         db.add(document)
         db.flush()

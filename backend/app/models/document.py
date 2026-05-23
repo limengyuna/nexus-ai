@@ -4,13 +4,14 @@
 import enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Boolean
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import TimestampMixin
+from app.models.knowledge_base import ChunkStrategy
 
 if TYPE_CHECKING:
     from app.models.knowledge_base import KnowledgeBase
@@ -70,6 +71,22 @@ class Document(Base, TimestampMixin):
         nullable=False,
         index=True,
         comment="文档处理状态",
+    )
+
+    # 文档级分块策略（可空：null 表示沿用所属知识库的默认策略）
+    # 允许同一 KB 内不同文档使用不同切分策略（如论文用 markdown，对话用 semantic）
+    chunk_strategy: Mapped[Optional[ChunkStrategy]] = mapped_column(
+        SAEnum(ChunkStrategy, name="chunk_strategy_enum", create_type=False),
+        nullable=True,
+        comment="文档级分块策略（null 表示使用 KB 默认）",
+    )
+
+    # 文档级 LLM 清洗开关（可空：null 表示沿用所属知识库的默认设置）
+    # 允许某些文档单独启用/禁用 LLM 清洗，而不影响 KB 里其他文档
+    enable_llm_clean: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="文档级 LLM 清洗开关（null 表示使用 KB 默认）",
     )
 
     error_msg: Mapped[Optional[str]] = mapped_column(

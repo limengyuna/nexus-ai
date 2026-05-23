@@ -15,6 +15,7 @@ export interface KnowledgeBase {
   chunk_strategy: ChunkStrategy
   chunk_size: number
   chunk_overlap: number
+  enable_llm_clean: boolean
   collection_name: string | null
   created_by: number
   created_at: string
@@ -30,6 +31,10 @@ export interface DocumentItem {
   file_size: number
   chunk_count: number
   status: DocumentStatus
+  // 文档级分块策略；为 null 表示沿用 KB 默认
+  chunk_strategy: ChunkStrategy | null
+  // 文档级 LLM 清洗开关；为 null 表示沿用 KB 默认
+  enable_llm_clean: boolean | null
   error_msg: string | null
   created_at: string
   updated_at: string
@@ -53,6 +58,7 @@ export interface KnowledgeBaseCreate {
   chunk_strategy?: ChunkStrategy
   chunk_size?: number
   chunk_overlap?: number
+  enable_llm_clean?: boolean
 }
 
 export interface KnowledgeBaseUpdate {
@@ -63,6 +69,7 @@ export interface KnowledgeBaseUpdate {
   chunk_strategy?: ChunkStrategy
   chunk_size?: number
   chunk_overlap?: number
+  enable_llm_clean?: boolean
 }
 
 // ---------- 知识库 ----------
@@ -117,9 +124,22 @@ export interface UploadResult {
   task: TaskRecord
 }
 
-export function uploadDocument(kbId: number, file: File): Promise<UploadResult> {
+export function uploadDocument(
+  kbId: number,
+  file: File,
+  chunkStrategy?: ChunkStrategy,
+  enableLlmClean?: boolean,
+): Promise<UploadResult> {
   const fd = new FormData()
   fd.append('file', file)
+  // 可选：覆盖 KB 默认策略
+  if (chunkStrategy) {
+    fd.append('chunk_strategy', chunkStrategy)
+  }
+  // 可选：覆盖 KB 默认 LLM 清洗开关（显式 true / false 都会上传，undefined 才沿用 KB）
+  if (enableLlmClean !== undefined) {
+    fd.append('enable_llm_clean', String(enableLlmClean))
+  }
   return request.post(`/knowledge-bases/${kbId}/documents`, fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })

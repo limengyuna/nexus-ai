@@ -36,6 +36,7 @@ class KnowledgeBaseService:
             chunk_strategy=payload.chunk_strategy,
             chunk_size=payload.chunk_size,
             chunk_overlap=payload.chunk_overlap,
+            enable_llm_clean=payload.enable_llm_clean,
             created_by=owner_id,
         )
         db.add(kb)

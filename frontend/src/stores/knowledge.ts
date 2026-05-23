@@ -5,7 +5,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import * as kbApi from '@/api/knowledge'
-import type { DocumentItem, KnowledgeBase, KnowledgeBaseCreate, KnowledgeBaseUpdate, TaskRecord } from '@/api/knowledge'
+import type { ChunkStrategy, DocumentItem, KnowledgeBase, KnowledgeBaseCreate, KnowledgeBaseUpdate, TaskRecord } from '@/api/knowledge'
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const knowledgeBases = ref<KnowledgeBase[]>([])
@@ -50,8 +50,10 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     kbId: number,
     file: File,
     onProgress?: (task: TaskRecord) => void,
+    chunkStrategy?: ChunkStrategy,
+    enableLlmClean?: boolean,
   ) {
-    const { task } = await kbApi.uploadDocument(kbId, file)
+    const { task } = await kbApi.uploadDocument(kbId, file, chunkStrategy, enableLlmClean)
     // 轮询任务进度
     return pollTask(task.id, onProgress)
   }
@@ -60,15 +62,21 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     taskId: number,
     onProgress?: (task: TaskRecord) => void,
   ): Promise<TaskRecord> {
-    for (let i = 0; i < 120; i++) {
+    // 轮询配置：每 2 秒拉一次，最多 30 分钟。
+    // 长耗时场景（如启用 LLM 清洗的大文档）总时长可达 10+ 分钟。
+    const POLL_INTERVAL_MS = 2000
+    const MAX_DURATION_MS = 30 * 60 * 1000 // 30 分钟
+    const MAX_ATTEMPTS = Math.ceil(MAX_DURATION_MS / POLL_INTERVAL_MS)
+
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
       const t = await kbApi.getTask(taskId)
       onProgress?.(t)
       if (t.status === 'success' || t.status === 'failed' || t.status === 'cancelled') {
         return t
       }
-      await new Promise((r) => setTimeout(r, 1000))
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
     }
-    throw new Error('任务超时')
+    throw new Error('任务超时（已超过 30 分钟，请到后台查看 Celery 日志）')
   }
 
   async function deleteDocument(kbId: number, docId: number) {

@@ -3,13 +3,14 @@
 
 提供文档上传、列表查询、删除、检索（测试用）等接口。
 """
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.knowledge_base import ChunkStrategy
 from app.models.user import User
 from app.rag.embedder import get_embedder
 from app.rag.vector_store import get_vector_store
@@ -38,6 +39,14 @@ router = APIRouter(prefix="/knowledge-bases/{kb_id}", tags=["文档"])
 def upload_document(
     kb_id: int,
     file: UploadFile = File(..., description="待上传的文档文件"),
+    # 可选的文档级分块策略：传则覆盖 KB 默认，不传则沿用 KB 默认
+    chunk_strategy: Optional[ChunkStrategy] = Form(
+        None, description="文档级分块策略（不传则沿用 KB 默认）"
+    ),
+    # 可选的文档级 LLM 清洗开关：传则覆盖 KB 默认，不传则沿用 KB 默认
+    enable_llm_clean: Optional[bool] = Form(
+        None, description="文档级 LLM 清洗开关（不传则沿用 KB 默认）"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -51,7 +60,11 @@ def upload_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     try:
-        document, task_record = DocumentService.upload(db, kb, file)
+        document, task_record = DocumentService.upload(
+            db, kb, file,
+            chunk_strategy=chunk_strategy,
+            enable_llm_clean=enable_llm_clean,
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

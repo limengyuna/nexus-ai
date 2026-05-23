@@ -91,7 +91,12 @@ class MarkdownHeaderSplitter(BaseSplitter):
     便于检索时返回上下文。
     """
 
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 80):
+    def __init__(
+        self,
+        chunk_size: int = 800,
+        chunk_overlap: int = 80,
+        min_chunk_chars: int = 200,
+    ):
         from langchain_text_splitters import (
             MarkdownHeaderTextSplitter,
             RecursiveCharacterTextSplitter,
@@ -114,44 +119,83 @@ class MarkdownHeaderSplitter(BaseSplitter):
         )
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        # 最小块字符数：低于此阈值的小块会尝试与相邻块合并
+        # 用于解决中文 PDF / DOCX 中 Unstructured 误把正文段落识别为 Title 导致的过度碎片化
+        self.min_chunk_chars = min_chunk_chars
 
     def split(self, text: str) -> List[Chunk]:
-        # 第一阶段：按标题切分（得到 parent 级别的块）
+        # ---------- 第一阶段：按标题切分（得到 parent 级别的块） ----------
         md_docs = self._md_splitter.split_text(text)
 
-        chunks: List[Chunk] = []
-        chunk_idx = 0
+        # ---------- 第二阶段：把每个 md_doc 转成原始候选块 ----------
+        # 候选块结构：{content, header_path, parent_content}
+        raw_candidates: List[Dict] = []
         for md_doc in md_docs:
-            # 构造完整标题路径
             header_path = " > ".join(
                 str(v) for k, v in md_doc.metadata.items() if k.startswith("h")
             )
             parent_content = md_doc.page_content
 
-            # 第二阶段：对长块再用递归切分（得到 child 级别的块）
+            # 长块再用递归切分（child 级别）
             sub_pieces = self._sub_splitter.split_text(parent_content)
-            
-            # Parent-Child 逻辑：
-            # 如果 parent 被切成多个 child，每个 child 记录 parent_content
-            # 检索时用 child 匹配，返回时回溯到 parent 保证上下文完整
             has_children = len(sub_pieces) > 1
-            
+
             for piece in sub_pieces:
-                metadata = {
-                    "chunk_index": chunk_idx,
-                    "strategy": "markdown_header",
+                raw_candidates.append({
+                    "content": piece,
                     "header_path": header_path or "(no-header)",
-                }
-                # 只有被切分的块才记录 parent_content（单块不需要）
-                if has_children:
-                    metadata["parent_content"] = parent_content
-                
-                chunks.append(Chunk(content=piece, metadata=metadata))
-                chunk_idx += 1
+                    # 只有被切分过的才有 parent_content
+                    "parent_content": parent_content if has_children else None,
+                })
+
+        # ---------- 第三阶段：贪心合并小块 ----------
+        # 规则：若当前累积块字符数 < min_chunk_chars，
+        # 且与下一个候选块合并后不超 chunk_size，则合并。
+        # 合并后丢弃 parent_content（因为已经聚合了足够上下文）。
+        # header_path 保留首个非空者，避免丢失章节信息。
+        merged: List[Dict] = []
+        buffer: Dict | None = None
+        for cand in raw_candidates:
+            if buffer is None:
+                buffer = dict(cand)
+                continue
+
+            buf_len = len(buffer["content"])
+            cand_len = len(cand["content"])
+
+            should_merge = (
+                buf_len < self.min_chunk_chars
+                and buf_len + cand_len + 1 <= self.chunk_size
+            )
+            if should_merge:
+                buffer["content"] = buffer["content"] + "\n" + cand["content"]
+                # 合并块的 header_path：优先保留 buffer 的（更靠前 = 更接近 parent）
+                if not buffer["header_path"] or buffer["header_path"] == "(no-header)":
+                    buffer["header_path"] = cand["header_path"]
+                # 合并后块已自带充足上下文，不再标记 parent_content
+                buffer["parent_content"] = None
+            else:
+                merged.append(buffer)
+                buffer = dict(cand)
+        if buffer is not None:
+            merged.append(buffer)
+
+        # ---------- 第四阶段：构造最终 Chunk ----------
+        chunks: List[Chunk] = []
+        for idx, m in enumerate(merged):
+            metadata = {
+                "chunk_index": idx,
+                "strategy": "markdown_header",
+                "header_path": m["header_path"],
+            }
+            if m["parent_content"]:
+                metadata["parent_content"] = m["parent_content"]
+            chunks.append(Chunk(content=m["content"], metadata=metadata))
 
         logger.info(
-            "MarkdownHeaderSplitter 切分完成: {} 字符 -> {} 块 (parent-child 启用)",
-            len(text), len(chunks),
+            "MarkdownHeaderSplitter 切分完成: {} 字符 -> {} 候选块 -> {} 块"
+            " (parent-child + 最小块合并 min={})",
+            len(text), len(raw_candidates), len(chunks), self.min_chunk_chars,
         )
         return chunks
 

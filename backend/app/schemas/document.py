@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 from app.models.document import DocumentStatus
+from app.models.knowledge_base import ChunkStrategy
 
 
 class DocumentOut(BaseModel):
@@ -20,6 +21,10 @@ class DocumentOut(BaseModel):
     file_size: int
     chunk_count: int
     status: DocumentStatus
+    # 文档级分块策略（null 表示该文档沿用 KB 默认策略）
+    chunk_strategy: Optional[ChunkStrategy] = None
+    # 文档级 LLM 清洗开关（null 表示沿用 KB 默认）
+    enable_llm_clean: Optional[bool] = None
     error_msg: Optional[str]
     created_at: datetime
     updated_at: datetime
