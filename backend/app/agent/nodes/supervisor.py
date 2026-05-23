@@ -68,8 +68,12 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 - 每个 step 的 agent 只能是 rag_agent 或 tool_agent
 - instruction 要具体明确，让子 Agent 知道该做什么
 
+### needs_previous_output 字段
+- **true**：本步的执行依赖前一步或前一轮对话的具体输出内容（即：如果不提供那段内容，本步就无法正确完成）
+- **false**：本步可独立执行，所需信息已在 instruction 中完整给出
+
 ### 输出格式（严格 JSON）
-{{"plan": [{{"step": 1, "agent": "rag_agent|tool_agent", "instruction": "具体指令"}}], "answer": "plan为空时的直接回答，有plan时留空"}}
+{{"plan": [{{"step": 1, "agent": "rag_agent|tool_agent", "instruction": "具体指令", "needs_previous_output": false}}], "answer": "plan为空时的直接回答，有plan时留空"}}
 
 只输出 JSON，不要任何其他文字。"""
 
@@ -84,16 +88,31 @@ def _build_step_check_prompt() -> str:
 - 如果所有步骤都已完成，选择 FINISH
 
 ## 输出格式（严格 JSON）
-{"action": "next|adjust|finish", "reason": "简短理由", "instruction": "给下一个Agent的指令（finish时留空）", "adjusted_plan": [{"step": N, "agent": "...", "instruction": "..."}]}
+{"action": "next|adjust|finish", "reason": "简短理由", "instruction": "给下一个Agent的指令（finish时留空）", "adjusted_plan": [{"step": N, "agent": "...", "instruction": "...", "needs_previous_output": false}]}
 
 - action=next：按原计划执行下一步
 - action=adjust：调整剩余计划（用 adjusted_plan 替换剩余步骤）
 - action=finish：所有任务完成
+- adjusted_plan 的每个 step 必须带 needs_previous_output 字段：true 表示需要引用前一步的输出内容
 
 只输出 JSON。"""
 
 
 # ---------- 工具函数 ----------
+
+# step_context 截断长度（防止 context window 过载）
+_STEP_CONTEXT_MAX_LEN = 6000
+
+
+def _get_last_assistant_msg(context_messages: List[Dict]) -> str:
+    """从对话历史中倒序查找最近一条 assistant 消息的 content。
+    用于跨轮场景下"上一步内容"的回溯（如新一轮用户说"把上一步写入文件"）。
+    """
+    for msg in reversed(context_messages):
+        if msg.get("role") == "assistant":
+            return msg.get("content", "") or ""
+    return ""
+
 
 def _get_mcp_info(user_id: Optional[int]) -> List[Dict[str, str]]:
     """
@@ -258,8 +277,20 @@ def _planning_phase(
             "step": len(valid_plan) + 1,
             "agent": agent,
             "instruction": step.get("instruction", user_input),
+            "needs_previous_output": bool(step.get("needs_previous_output", False)),
             "status": "pending",
         })
+
+    # 编程式打包 step_contexts：
+    # - 第一步若 needs_previous_output=true：取对话历史最近一条 assistant 消息（跨轮引用）
+    # - 后续步骤的 context 在 _dispatch_step 时用 state.final_answer 动态填充
+    step_contexts: Dict[int, str] = {}
+    if valid_plan and valid_plan[0].get("needs_previous_output"):
+        last_assistant = _get_last_assistant_msg(context_messages)
+        if last_assistant:
+            step_contexts[valid_plan[0]["step"]] = last_assistant[:_STEP_CONTEXT_MAX_LEN]
+            logger.info("[Supervisor] step {} 跨轮引用上一轮回答 ({} 字)",
+                        valid_plan[0]["step"], len(last_assistant))
 
     # plan 为空 → 闲聊，Supervisor 自己回答
     if not valid_plan:
@@ -314,6 +345,7 @@ def _planning_phase(
         "route_reason": reason,
         "supervisor_instruction": instruction,
         "task_plan": valid_plan,
+        "step_contexts": step_contexts,
         "agent_iterations": 1,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
@@ -407,6 +439,7 @@ def _execution_phase(
                     "step": len(task_plan) + 1,
                     "agent": agent,
                     "instruction": new_step.get("instruction", ""),
+                    "needs_previous_output": bool(new_step.get("needs_previous_output", False)),
                     "status": "pending",
                 })
         logger.info("[Supervisor] 调整计划，新增 {} 步", len(adjusted))
@@ -442,6 +475,17 @@ def _dispatch_step(
     intent = "rag" if next_agent == NEXT_RAG else "tool"
     reason = f"执行 step {step['step']}/{len(task_plan)}: {instruction[:30]}"
 
+    # 动态填充 step_context：
+    # - 非首步且 needs_previous_output=true → 用 state.final_answer（前一步执行完写入的）
+    # - 若 step_contexts 中已有内容（例如 planning 阶段就打包好的跨轮引用），保留不覆盖
+    step_contexts = dict(state.get("step_contexts", {}))
+    if step.get("needs_previous_output") and step["step"] not in step_contexts:
+        previous_output = state.get("final_answer", "") or ""
+        if previous_output:
+            step_contexts[step["step"]] = previous_output[:_STEP_CONTEXT_MAX_LEN]
+            logger.info("[Supervisor] step {} 引用上一步输出 ({} 字)",
+                        step["step"], len(previous_output))
+
     logger.info("[Supervisor] 分发 step {} → {} | {}", step["step"], next_agent, instruction[:50])
 
     # 实时推送 meta 消息给前端，同步任务执行状态（例如：第一步变完成，第二步变执行中）
@@ -458,6 +502,7 @@ def _dispatch_step(
         "route_reason": reason,
         "supervisor_instruction": instruction,
         "task_plan": task_plan,
+        "step_contexts": step_contexts,
         "agent_iterations": iterations + 1,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(

@@ -176,7 +176,19 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
     # Supervisor 架构：判断是否有 Supervisor 指令
     supervisor_instruction = state.get("supervisor_instruction", "")
-    existing_answer = state.get("final_answer", "")
+
+    # 先确定当前执行的步骤编号（用于标记工具调用归属，以及读取 step_context）
+    task_plan = state.get("task_plan", [])
+    current_step = 0
+    for s in task_plan:
+        if s.get("status") == "in_progress":
+            current_step = s.get("step", 0)
+            break
+
+    # 从 Supervisor 显式打包的 step_contexts 中读取本步骤需要的上下文
+    # （由 Supervisor 在 _planning_phase / _dispatch_step 中按 needs_previous_output 标记打包）
+    step_contexts = state.get("step_contexts", {}) or {}
+    step_context = step_contexts.get(current_step, "")
 
     if supervisor_instruction:
         # 有 Supervisor 指令时：只注入指令，不注入原始用户消息（context_messages），
@@ -184,30 +196,23 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         messages = [
             {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
         ]
-        if existing_answer:
+        if step_context:
             messages.append({
                 "role": "assistant",
-                "content": f"上一步执行结果如下（可直接引用）：\n\n{existing_answer[:6000]}",
+                "content": f"上一步执行结果如下（可直接引用）：\n\n{step_context}",
             })
         messages.append({
             "role": "user",
             "content": supervisor_instruction,
         })
-        logger.info("[Tool Agent] Supervisor 指令：{}", supervisor_instruction[:100])
+        logger.info("[Tool Agent] Supervisor 指令：{} | step_context: {} 字",
+                    supervisor_instruction[:100], len(step_context))
     else:
         # 无 Supervisor 指令时：使用完整对话上下文（直接路由场景）
         messages = [
             {"role": "system", "content": _TOOL_AGENT_SYSTEM_PROMPT},
             *context_messages,
         ]
-
-    # 获取当前执行的步骤编号（用于标记工具调用归属哪一步）
-    task_plan = state.get("task_plan", [])
-    current_step = 0
-    for s in task_plan:
-        if s.get("status") == "in_progress":
-            current_step = s.get("step", 0)
-            break
 
     tool_call_records: List[ToolCallRecord] = []
     skill_used: Optional[str] = None

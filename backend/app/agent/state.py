@@ -76,6 +76,7 @@ class AgentState(TypedDict, total=False):
     supervisor_instruction: str                # Supervisor 给子 Agent 的指令
     agent_iterations: int                      # Supervisor 循环计数（防止无限循环）
     task_plan: List[Dict[str, Any]]            # Supervisor 动态任务计划
+    step_contexts: Dict[int, str]              # 每个 step 执行时需要的上下文（按 step number 索引，Supervisor 显式打包）
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果
@@ -123,6 +124,7 @@ def make_initial_state(
         supervisor_instruction="",
         agent_iterations=0,
         task_plan=[],
+        step_contexts={},
         retrieved_docs=[],
         retrieved_memories=[],
         tool_calls=[],

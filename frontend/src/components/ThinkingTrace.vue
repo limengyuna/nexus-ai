@@ -56,6 +56,23 @@ function toggleDoc(index: number) {
 // 全局工具调用展开
 const expandedTools = ref(false)
 
+// 决策历史展开状态
+const expandedDecisions = ref(false)
+
+// 决策历史：倒序展示（最新一条放最上面），且过滤掉当前最新的（在卡片上方已展示）
+const previousDecisions = computed(() => {
+  const list = chat.lastDecisions || []
+  if (list.length <= 1) return []
+  // 最新一条是数组末尾，前面的都是历史，按时间倒序返回（最近的在前）
+  return list.slice(0, -1).reverse()
+})
+
+function decisionIntentClass(intent: string) {
+  if (intent === 'rag') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+  if (intent === 'tool') return 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+  return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+}
+
 const hasData = computed(() =>
   chat.lastIntent || chat.lastTrace.length > 0 || chat.lastToolCalls.length > 0 || chat.lastTaskPlan.length > 0,
 )
@@ -170,6 +187,38 @@ function agentBadgeClass(agent: string) {
         <p v-if="chat.lastRouteReason" class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
           {{ chat.lastRouteReason }}
         </p>
+
+        <!-- 决策历史折叠（仅当存在多条历史决策时显示） -->
+        <div v-if="previousDecisions.length > 0" class="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800">
+          <div
+            class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            @click="expandedDecisions = !expandedDecisions"
+          >
+            <component :is="expandedDecisions ? ChevronDown : ChevronRight" :size="11" />
+            <Clock :size="11" class="text-primary-500" />
+            <span>历史决策（{{ previousDecisions.length }} 条）</span>
+          </div>
+          <div v-if="expandedDecisions" class="mt-2 space-y-1.5 animate-slide-down">
+            <div
+              v-for="(d, idx) in previousDecisions"
+              :key="idx"
+              class="rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900/40 p-2.5"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] font-mono text-gray-400 dark:text-gray-500">#{{ previousDecisions.length - idx }}</span>
+                <span
+                  v-if="d.intent"
+                  class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider"
+                  :class="decisionIntentClass(d.intent)"
+                >{{ d.intent }}</span>
+              </div>
+              <p class="text-[11px] text-gray-600 dark:text-gray-300 leading-relaxed">
+                {{ d.routeReason }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- 渐变发光计划概览 -->
         <div v-if="hasTaskPlan" class="mt-3 flex items-center gap-2">
           <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden border border-gray-100/10 dark:border-gray-800/10">

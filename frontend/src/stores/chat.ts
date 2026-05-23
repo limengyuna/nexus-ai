@@ -18,6 +18,13 @@ import type {
 import * as chatApi from '@/api/chat'
 
 // ---------- LocalStorage 思考过程持久化辅助函数 ----------
+// Supervisor 决策历史项（每一轮 dispatch 的快照）
+interface DecisionEntry {
+  intent: string
+  routeReason: string
+  timestamp: number
+}
+
 function saveThinkingTrace(
   sessionId: number,
   messageId: number,
@@ -30,6 +37,7 @@ function saveThinkingTrace(
     retrieved_docs: RetrievedDoc[]
     retrieved_memories?: RetrievedMemory[]
     task_plan?: any[] // 新增执行计划字段
+    decisions?: DecisionEntry[] // 新增决策历史字段
   }
 ) {
   try {
@@ -58,6 +66,7 @@ function saveThinkingTrace(
       retrievedDocs: data.retrieved_docs,
       retrievedMemories: data.retrieved_memories || [],
       taskPlan: data.task_plan || [], // 新增持久化存储执行计划
+      decisions: data.decisions || [], // 新增持久化存储决策历史
       timestamp: Date.now()
     }
 
@@ -101,6 +110,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastRouteReason = ref('')
   const lastSkillUsed = ref<string | null>(null)
   const lastTaskPlan = ref<any[]>([])  // Supervisor 动态任务计划
+  const lastDecisions = ref<DecisionEntry[]>([])  // Supervisor 决策历史（按时间顺序）
   const lastTrace = ref<TraceStep[]>([])
   const lastToolCalls = ref<ToolCall[]>([])
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
@@ -141,6 +151,7 @@ export const useChatStore = defineStore('chat', () => {
         lastRetrievedDocs.value = snapshot.retrievedDocs || []
         lastRetrievedMemories.value = snapshot.retrievedMemories || []
         lastTaskPlan.value = snapshot.taskPlan || [] // 恢复加载本地存储的执行计划
+        lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
         activeThinkingMessageId.value = snapshot.messageId
       } else {
         clearTrace()
@@ -168,6 +179,7 @@ export const useChatStore = defineStore('chat', () => {
           lastRetrievedDocs.value = snapshot.retrievedDocs || []
           lastRetrievedMemories.value = snapshot.retrievedMemories || []
           lastTaskPlan.value = snapshot.taskPlan || [] // 切换消息时，恢复加载对应执行计划
+          lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
           activeThinkingMessageId.value = snapshot.messageId
         }
       }
@@ -264,6 +276,10 @@ export const useChatStore = defineStore('chat', () => {
       lastToolCalls.value = resp.tool_calls
       lastRetrievedDocs.value = resp.retrieved_docs
       lastRetrievedMemories.value = resp.retrieved_memories || []
+      // 非流式只能拿到最终一次决策，构造单元素历史列表
+      lastDecisions.value = resp.intent && resp.route_reason
+        ? [{ intent: resp.intent, routeReason: resp.route_reason, timestamp: Date.now() }]
+        : []
 
       // 保存最新思考快照到 LocalStorage
       const assistantMsg = messages.value.find((m) => m.role === 'assistant' && m.id > 0)
@@ -276,6 +292,7 @@ export const useChatStore = defineStore('chat', () => {
         tool_calls: resp.tool_calls,
         retrieved_docs: resp.retrieved_docs,
         retrieved_memories: resp.retrieved_memories,
+        decisions: lastDecisions.value, // 持久化决策历史
       })
 
       // 会话标题可能被后端更新（首次发消息时）
@@ -342,6 +359,16 @@ export const useChatStore = defineStore('chat', () => {
           if (data.task_plan) {
             lastTaskPlan.value = data.task_plan
           }
+          // 追加 Supervisor 决策到历史列表（带去重：与最近一条相同的 intent+reason 不重复记录）
+          if (data.intent && data.route_reason) {
+            const last = lastDecisions.value[lastDecisions.value.length - 1]
+            if (!last || last.intent !== data.intent || last.routeReason !== data.route_reason) {
+              lastDecisions.value = [
+                ...lastDecisions.value,
+                { intent: data.intent, routeReason: data.route_reason, timestamp: Date.now() },
+              ]
+            }
+          }
           // 同步 agent_source
           if (data.intent === 'rag') assistantRef.agent_source = 'rag'
           else if (data.intent === 'tool') assistantRef.agent_source = 'tool'
@@ -376,6 +403,7 @@ export const useChatStore = defineStore('chat', () => {
               retrieved_docs: data.retrieved_docs,
               retrieved_memories: data.retrieved_memories,
               task_plan: lastTaskPlan.value, // 完美传入最新执行计划
+              decisions: lastDecisions.value, // 持久化决策历史
             })
           }
 
@@ -402,6 +430,7 @@ export const useChatStore = defineStore('chat', () => {
     lastRouteReason.value = ''
     lastSkillUsed.value = null
     lastTaskPlan.value = []
+    lastDecisions.value = []
     lastTrace.value = []
     lastToolCalls.value = []
     lastRetrievedDocs.value = []
@@ -420,6 +449,7 @@ export const useChatStore = defineStore('chat', () => {
     lastRouteReason,
     lastSkillUsed,
     lastTaskPlan,
+    lastDecisions,
     lastTrace,
     lastToolCalls,
     lastRetrievedDocs,
