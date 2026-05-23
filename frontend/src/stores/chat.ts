@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   ChatResponse,
   ChatSession,
+  FaithfulnessResult,
   RetrievedDoc,
   RetrievedMemory,
   ToolCall,
@@ -38,6 +39,7 @@ function saveThinkingTrace(
     retrieved_memories?: RetrievedMemory[]
     task_plan?: any[] // 新增执行计划字段
     decisions?: DecisionEntry[] // 新增决策历史字段
+    faithfulness?: FaithfulnessResult | null // 忠实性校验结果
   }
 ) {
   try {
@@ -67,6 +69,7 @@ function saveThinkingTrace(
       retrievedMemories: data.retrieved_memories || [],
       taskPlan: data.task_plan || [], // 新增持久化存储执行计划
       decisions: data.decisions || [], // 新增持久化存储决策历史
+      faithfulness: data.faithfulness || null, // 忠实性校验结果
       timestamp: Date.now()
     }
 
@@ -115,6 +118,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastToolCalls = ref<ToolCall[]>([])
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
   const lastRetrievedMemories = ref<RetrievedMemory[]>([])
+  const lastFaithfulness = ref<FaithfulnessResult | null>(null)
   const activeThinkingMessageId = ref<number | null>(null)
 
   // ---------- 计算属性 ----------
@@ -150,6 +154,7 @@ export const useChatStore = defineStore('chat', () => {
         lastToolCalls.value = snapshot.toolCalls || []
         lastRetrievedDocs.value = snapshot.retrievedDocs || []
         lastRetrievedMemories.value = snapshot.retrievedMemories || []
+        lastFaithfulness.value = snapshot.faithfulness || null
         lastTaskPlan.value = snapshot.taskPlan || [] // 恢复加载本地存储的执行计划
         lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
         activeThinkingMessageId.value = snapshot.messageId
@@ -178,6 +183,7 @@ export const useChatStore = defineStore('chat', () => {
           lastToolCalls.value = snapshot.toolCalls || []
           lastRetrievedDocs.value = snapshot.retrievedDocs || []
           lastRetrievedMemories.value = snapshot.retrievedMemories || []
+          lastFaithfulness.value = snapshot.faithfulness || null
           lastTaskPlan.value = snapshot.taskPlan || [] // 切换消息时，恢复加载对应执行计划
           lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
           activeThinkingMessageId.value = snapshot.messageId
@@ -387,6 +393,7 @@ export const useChatStore = defineStore('chat', () => {
           lastToolCalls.value = data.tool_calls
           lastRetrievedDocs.value = data.retrieved_docs
           lastRetrievedMemories.value = data.retrieved_memories || []
+          lastFaithfulness.value = data.faithfulness || null
           // 更新 task_plan 为最终完整状态
           if (data.task_plan && data.task_plan.length > 0) {
             lastTaskPlan.value = data.task_plan
@@ -404,6 +411,7 @@ export const useChatStore = defineStore('chat', () => {
               retrieved_memories: data.retrieved_memories,
               task_plan: lastTaskPlan.value, // 完美传入最新执行计划
               decisions: lastDecisions.value, // 持久化决策历史
+              faithfulness: lastFaithfulness.value, // 忠实性校验结果
             })
           }
 
@@ -435,6 +443,7 @@ export const useChatStore = defineStore('chat', () => {
     lastToolCalls.value = []
     lastRetrievedDocs.value = []
     lastRetrievedMemories.value = []
+    lastFaithfulness.value = null
     activeThinkingMessageId.value = null
   }
 
@@ -454,6 +463,7 @@ export const useChatStore = defineStore('chat', () => {
     lastToolCalls,
     lastRetrievedDocs,
     lastRetrievedMemories,
+    lastFaithfulness,
     activeThinkingMessageId,
     fetchSessions,
     selectSession,

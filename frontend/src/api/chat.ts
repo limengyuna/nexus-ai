@@ -61,6 +61,21 @@ export interface RetrievedMemory {
   importance: number
 }
 
+export interface FaithfulnessClaim {
+  text: string           // 从回答中提取的事实声明
+  supported: boolean     // 是否有资料支撑
+  source_index: number   // 支撑该声明的资料编号（0 表示无来源）
+  reason: string         // 判断理由
+}
+
+export interface FaithfulnessResult {
+  score: number              // 忠实度评分（0.0 ~ 1.0，-1 表示校验失败）
+  claims: FaithfulnessClaim[]
+  total_claims: number
+  supported_claims: number
+  elapsed_ms: number
+}
+
 export interface ChatResponse {
   message: ChatMessage
   intent: string
@@ -115,6 +130,7 @@ export interface StreamHandlers {
     retrieved_docs: RetrievedDoc[]
     retrieved_memories: RetrievedMemory[]
     task_plan: any[]
+    faithfulness: FaithfulnessResult | null
     token_usage: number
     agent_source: string
   }) => void

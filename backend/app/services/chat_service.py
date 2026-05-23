@@ -513,6 +513,9 @@ class ChatService:
         task_plan = json.loads(
             json.dumps(final_state.get("task_plan", []), default=str)
         )
+        faithfulness = json.loads(
+            json.dumps(final_state.get("faithfulness", {}), default=str)
+        )
         yield (
             "done",
             {
@@ -523,6 +526,7 @@ class ChatService:
                 "retrieved_docs": retrieved_docs,
                 "retrieved_memories": retrieved_memories,
                 "task_plan": task_plan,
+                "faithfulness": faithfulness,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
                 "agent_source": src.value if hasattr(src, "value") else str(src),
             },

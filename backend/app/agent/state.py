@@ -43,6 +43,23 @@ class RetrievedMemory(TypedDict, total=False):
     importance: float
 
 
+class FaithfulnessClaim(TypedDict, total=False):
+    """单条忠实性声明校验结果"""
+    text: str                        # 从回答中提取的事实声明
+    supported: bool                  # 是否有资料支撑
+    source_index: int                # 支撑该声明的资料编号（从 1 开始，0 表示无来源）
+    reason: str                      # 判断理由（简短说明）
+
+
+class FaithfulnessResult(TypedDict, total=False):
+    """忠实性校验整体结果"""
+    score: float                     # 忠实度评分（0.0 ~ 1.0，有来源支撑的声明占比）
+    claims: list                     # List[FaithfulnessClaim]
+    total_claims: int                # 声明总数
+    supported_claims: int            # 有来源支撑的声明数
+    elapsed_ms: int                  # 校验耗时（毫秒）
+
+
 class ToolCallRecord(TypedDict, total=False):
     """工具/Skill 调用记录"""
     name: str                    # 工具或技能名
@@ -80,6 +97,7 @@ class AgentState(TypedDict, total=False):
 
     # ---------- RAG ----------
     retrieved_docs: List[RetrievedDoc]         # 检索结果
+    faithfulness: Dict[str, Any]               # 忠实性校验结果（FaithfulnessResult）
 
     # ---------- L2 Memory 事实库 ----------
     retrieved_memories: List[RetrievedMemory]   # 检索到的历史事实记忆
@@ -126,6 +144,7 @@ def make_initial_state(
         task_plan=[],
         step_contexts={},
         retrieved_docs=[],
+        faithfulness={},
         retrieved_memories=[],
         tool_calls=[],
         skill_used=None,

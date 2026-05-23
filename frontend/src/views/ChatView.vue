@@ -491,7 +491,7 @@ function onKeyDown(e: KeyboardEvent) {
               :is-last-assistant="m.role === 'assistant' && idx === chat.messages.length - 1 && !chat.sending"
               @regenerate="regenerateLastAnswer"
             />
-            <div v-if="chat.sending" class="flex justify-start">
+            <div v-if="chat.sending && !chat.messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
               <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                 <span class="inline-flex gap-1">
                   <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0s"></span>

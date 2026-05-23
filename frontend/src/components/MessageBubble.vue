@@ -6,7 +6,7 @@
  * - AI 消息：左侧 + 白底 + Markdown 渲染 + hover 显示复制/重新生成
  */
 import { computed, ref } from 'vue'
-import { Check, Copy, RotateCcw, Sparkles } from 'lucide-vue-next'
+import { Check, Copy, RotateCcw, ShieldCheck, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import type { ChatMessage } from '@/api/chat'
@@ -129,6 +129,21 @@ const shortTime = computed(() => {
         <!-- token 消耗 -->
         <span v-if="!isUser && message.token_usage" class="text-gray-400 dark:text-gray-500">
           · {{ message.token_usage }} tokens
+        </span>
+
+        <!-- 忠实度徽章（仅当前活跃的思考过程消息 + 有校验结果时显示） -->
+        <span
+          v-if="!isUser && isThinkingActive && chatStore.lastFaithfulness && chatStore.lastFaithfulness.score >= 0"
+          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+          :class="{
+            'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300': chatStore.lastFaithfulness.score >= 0.8,
+            'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300': chatStore.lastFaithfulness.score >= 0.5 && chatStore.lastFaithfulness.score < 0.8,
+            'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300': chatStore.lastFaithfulness.score < 0.5,
+          }"
+          :title="`忠实度: ${Math.round(chatStore.lastFaithfulness.score * 100)}% (${chatStore.lastFaithfulness.supported_claims}/${chatStore.lastFaithfulness.total_claims} 条声明有据可查)`"
+        >
+          <ShieldCheck :size="10" />
+          {{ Math.round(chatStore.lastFaithfulness.score * 100) }}%
         </span>
 
         <!-- 思考过程查看按钮 -->

@@ -11,7 +11,7 @@
 import { computed, ref } from 'vue'
 import {
   Sparkles, Zap, Copy, Check, CircleCheck, Circle, Loader,
-  BookOpen, Wrench, ChevronDown, ChevronRight, Clock, Brain
+  BookOpen, Wrench, ChevronDown, ChevronRight, Clock, Brain, ShieldCheck
 } from 'lucide-vue-next'
 
 import { useChatStore } from '@/stores/chat'
@@ -103,6 +103,33 @@ const effectiveHitsCount = computed(() => {
   const ragStep = chat.lastTrace.find((s: any) => s.node === 'rag_agent')
   return ragStep?.output?.effective_hits ?? chat.lastRetrievedDocs.length
 })
+
+// 忠实性校验
+const faithfulness = computed(() => chat.lastFaithfulness)
+const hasFaithfulness = computed(() => {
+  const f = faithfulness.value
+  return f && typeof f.score === 'number' && f.score >= 0
+})
+const faithScorePercent = computed(() => {
+  const f = faithfulness.value
+  if (!f || f.score < 0) return 0
+  return Math.round(f.score * 100)
+})
+const faithScoreColor = computed(() => {
+  const p = faithScorePercent.value
+  if (p >= 80) return 'text-emerald-600 dark:text-emerald-400'
+  if (p >= 50) return 'text-amber-600 dark:text-amber-400'
+  return 'text-red-600 dark:text-red-400'
+})
+const faithBgColor = computed(() => {
+  const p = faithScorePercent.value
+  if (p >= 80) return 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+  if (p >= 50) return 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+  return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+})
+
+// 忠实性声明展开状态
+const expandedFaithClaims = ref(false)
 
 // Token 统计
 const nodeTokens = computed(() => {
@@ -448,6 +475,83 @@ function agentBadgeClass(agent: string) {
                 {{ doc.metadata.parent_content }}
               </p>
             </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 忠实性校验 ========== -->
+      <section v-if="hasFaithfulness">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5">
+          <ShieldCheck :size="12" class="text-emerald-500" />
+          忠实性校验
+          <span class="text-gray-400 dark:text-gray-500 font-normal">({{ faithfulness?.elapsed_ms }}ms)</span>
+        </div>
+        <div class="rounded-xl border p-4" :class="faithBgColor">
+          <!-- 评分概览 -->
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-2xl font-bold" :class="faithScoreColor">{{ faithScorePercent }}%</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">来源可信度</span>
+            </div>
+            <div class="text-right text-[10px] text-gray-500 dark:text-gray-400">
+              <span :class="faithScoreColor" class="font-semibold">{{ faithfulness?.supported_claims }}</span>
+              <span> / {{ faithfulness?.total_claims }} 条声明有据可查</span>
+            </div>
+          </div>
+
+          <!-- 进度条 -->
+          <div class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-3">
+            <div
+              class="h-full rounded-full transition-all duration-500"
+              :class="{
+                'bg-emerald-500': faithScorePercent >= 80,
+                'bg-amber-500': faithScorePercent >= 50 && faithScorePercent < 80,
+                'bg-red-500': faithScorePercent < 50,
+              }"
+              :style="{ width: `${faithScorePercent}%` }"
+            ></div>
+          </div>
+
+          <!-- 声明列表折叠 -->
+          <div
+            class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            @click="expandedFaithClaims = !expandedFaithClaims"
+          >
+            <component :is="expandedFaithClaims ? ChevronDown : ChevronRight" :size="11" />
+            <span>查看逐条校验明细</span>
+          </div>
+
+          <div v-if="expandedFaithClaims" class="mt-2.5 space-y-1.5 animate-slide-down">
+            <div
+              v-for="(claim, idx) in faithfulness?.claims || []"
+              :key="idx"
+              class="rounded-lg border p-2.5 text-xs transition-all"
+              :class="claim.supported
+                ? 'bg-white dark:bg-gray-900 border-emerald-200 dark:border-emerald-800/50'
+                : 'bg-white dark:bg-gray-900 border-red-200 dark:border-red-800/50'"
+            >
+              <div class="flex items-start gap-2">
+                <!-- 状态图标 -->
+                <span class="mt-0.5 flex-shrink-0">
+                  <CircleCheck v-if="claim.supported" :size="14" class="text-emerald-500" />
+                  <Circle v-else :size="14" class="text-red-400" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <!-- 声明文本 -->
+                  <p class="text-gray-700 dark:text-gray-200 leading-relaxed">{{ claim.text }}</p>
+                  <!-- 理由 + 来源 -->
+                  <div class="flex items-center gap-2 mt-1">
+                    <span v-if="claim.supported && claim.source_index > 0" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">
+                      来源: 资料 #{{ claim.source_index }}
+                    </span>
+                    <span v-if="!claim.supported" class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium">
+                      ⚠️ 未找到来源支撑
+                    </span>
+                    <span v-if="claim.reason" class="text-[10px] text-gray-400 dark:text-gray-500 truncate">— {{ claim.reason }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
