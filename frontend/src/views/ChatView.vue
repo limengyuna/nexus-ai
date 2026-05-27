@@ -534,8 +534,8 @@ function onKeyDown(e: KeyboardEvent) {
 
       <!-- 输入区 -->
       <div class="border-t border-gray-200 dark:border-gray-800 p-4 flex-shrink-0 bg-gray-50/30 dark:bg-gray-900/10">
-        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格) -->
-        <div v-if="chat.activeSessionId" class="flex items-center justify-between text-[11px] mb-2 text-gray-500 dark:text-gray-400 select-none px-1">
+        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格) — 暂时隐藏 -->
+        <div v-if="false" class="flex items-center justify-between text-[11px] mb-2 text-gray-500 dark:text-gray-400 select-none px-1">
           <div class="flex items-center gap-1.5">
             <Zap :size="11" class="text-amber-500 flex-shrink-0" :class="chat.sending ? 'animate-pulse' : ''" />
             <span class="font-medium">活动上下文窗口已用：</span>
