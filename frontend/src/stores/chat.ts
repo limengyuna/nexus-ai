@@ -11,6 +11,7 @@ import type {
   ChatResponse,
   ChatSession,
   FaithfulnessResult,
+  InterruptEvent,
   RetrievedDoc,
   RetrievedMemory,
   ToolCall,
@@ -107,6 +108,9 @@ export const useChatStore = defineStore('chat', () => {
   const activeSessionId = ref<number | null>(null)
   const messages = ref<ChatMessage[]>([])
   const sending = ref(false)
+
+  // 工具审批状态（当 Agent 调用危险工具触发 interrupt 时填充）
+  const pendingApproval = ref<InterruptEvent | null>(null)
 
   // 最近一次回复的"思考过程"快照
   const lastIntent = ref('')
@@ -418,6 +422,12 @@ export const useChatStore = defineStore('chat', () => {
           // 会话标题可能变了（首条消息时）
           await fetchSessions()
         },
+        onInterrupt: (data) => {
+          // Agent 被中断，等待用户审批（危险工具调用）
+          pendingApproval.value = data
+          // 在 assistant 消息尾部加一个提示，让用户知道需要审批
+          assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
+        },
         onError: (data) => {
           // 把错误信息追加到 assistant 占位上
           assistantRef.content += `\n\n[错误] ${data.message}`
@@ -447,6 +457,98 @@ export const useChatStore = defineStore('chat', () => {
     activeThinkingMessageId.value = null
   }
 
+  /**
+   * 用户对危险工具调用审批后，恢复图执行
+   * @param action 'approve' | 'reject'
+   * @param reason 拒绝理由（可选）
+   * @param editedArgs 用户编辑后的参数（可选、仅 approve 时可用）
+   */
+  async function resumeApproval(
+    action: 'approve' | 'reject',
+    reason?: string,
+    editedArgs?: Record<string, any> | null,
+  ): Promise<void> {
+    const approval = pendingApproval.value
+    if (!approval || !activeSessionId.value) return
+    pendingApproval.value = null  // 清除审批状态
+    sending.value = true
+
+    // 找到当前占位的 assistant 消息，继续往里填充
+    const assistantRef = messages.value[messages.value.length - 1]
+
+    // 清除之前的审批提示文本
+    if (assistantRef && assistantRef.role === 'assistant') {
+      assistantRef.content = assistantRef.content.replace(
+        /\n\n⚠️ Agent 想要调用一个工具，请在下方审批…$/,
+        '',
+      )
+    }
+
+    try {
+      await chatApi.resumeMessageStream(activeSessionId.value, {
+        user_msg_id: approval.user_msg_id,
+        action,
+        reason,
+        edited_args: editedArgs,
+      }, {
+        onStatus: () => {},
+        onMeta: (data: any) => {
+          lastIntent.value = data.intent
+          lastRouteReason.value = data.route_reason
+          lastSkillUsed.value = data.skill_used
+          if (data.task_plan) lastTaskPlan.value = data.task_plan
+        },
+        onChunk: (text) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.content += text
+          }
+        },
+        onInterrupt: (data) => {
+          // 再次中断（多次审批场景）
+          pendingApproval.value = data
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
+          }
+        },
+        onDone: async (data) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.id = data.message_id
+            assistantRef.tool_calls_json = data.tool_calls
+            assistantRef.token_usage = data.token_usage || null
+          }
+          lastTrace.value = data.execution_trace
+          lastToolCalls.value = data.tool_calls
+          lastRetrievedDocs.value = data.retrieved_docs
+          lastRetrievedMemories.value = data.retrieved_memories || []
+          lastFaithfulness.value = data.faithfulness || null
+          if (data.task_plan?.length) lastTaskPlan.value = data.task_plan
+          if (activeSessionId.value) {
+            saveThinkingTrace(activeSessionId.value, data.message_id, {
+              intent: lastIntent.value,
+              route_reason: lastRouteReason.value,
+              skill_used: lastSkillUsed.value,
+              execution_trace: data.execution_trace,
+              tool_calls: data.tool_calls,
+              retrieved_docs: data.retrieved_docs,
+              retrieved_memories: data.retrieved_memories,
+              task_plan: lastTaskPlan.value,
+              decisions: lastDecisions.value,
+              faithfulness: lastFaithfulness.value,
+            })
+          }
+          await fetchSessions()
+        },
+        onError: (data) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.content += `\n\n[恢复失败] ${data.message}`
+          }
+        },
+      })
+    } finally {
+      sending.value = false
+    }
+  }
+
   return {
     sessions,
     sessionsLoading,
@@ -454,6 +556,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSession,
     messages,
     sending,
+    pendingApproval,
     lastIntent,
     lastRouteReason,
     lastSkillUsed,
@@ -472,6 +575,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     sendMessage,
     sendMessageStream,
+    resumeApproval,
     clearTrace,
     loadThinkingTraceForMessage,
   }

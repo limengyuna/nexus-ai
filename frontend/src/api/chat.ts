@@ -118,10 +118,34 @@ export function sendMessage(sessionId: number, message: string): Promise<ChatRes
 }
 
 // ---------- SSE 流式 ----------
+export interface ApprovalPayload {
+  type: 'tool_approval'
+  tool_name: string
+  tool_kind: 'internal' | 'mcp' | 'skill'
+  description: string
+  arguments: Record<string, any>
+  message: string
+}
+
+export interface InterruptEvent {
+  user_msg_id: number       // resume 时必传，定位 thread_id
+  session_id: number
+  payload: ApprovalPayload
+}
+
+export interface ResumeDecision {
+  user_msg_id: number
+  action: 'approve' | 'reject'
+  reason?: string
+  edited_args?: Record<string, any> | null
+}
+
 export interface StreamHandlers {
   onStatus?: (data: { step: string; user_msg_id?: number }) => void
   onMeta?: (data: { intent: string; route_reason: string; skill_used: string | null; task_plan?: any[] }) => void
   onChunk?: (text: string) => void
+  onApprovalPending?: (data: ApprovalPayload) => void  // tool_agent 即将 interrupt 的提示（可选体验事件）
+  onInterrupt?: (data: InterruptEvent) => void         // 真正的中断事件，需要用户审批后调用 resumeMessageStream
   onDone?: (data: {
     message_id: number
     session_id: number
@@ -133,6 +157,7 @@ export interface StreamHandlers {
     faithfulness: FaithfulnessResult | null
     token_usage: number
     agent_source: string
+    resumed?: boolean       // 是否由 resume 端点产生
   }) => void
   onError?: (data: { message: string; type: string }) => void
 }
@@ -147,17 +172,49 @@ export async function sendMessageStream(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  // 与 request.ts / auth store 保持一致：localStorage key = 'access_token'
+  await openSseStream(
+    `/api/v1/chat/sessions/${sessionId}/messages/stream`,
+    { message },
+    handlers,
+    signal,
+  )
+}
+
+/**
+ * 中断恢复（SSE）—— 用户对工具审批后调用，传 approve/reject 决定
+ * 后端从 checkpoint 恢复执行，继续推送 token；可能再次产生 interrupt 事件（多次审批）
+ */
+export async function resumeMessageStream(
+  sessionId: number,
+  decision: ResumeDecision,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  await openSseStream(
+    `/api/v1/chat/sessions/${sessionId}/resume`,
+    decision,
+    handlers,
+    signal,
+  )
+}
+
+// 抽取的共用 SSE 读取逻辑：发起 POST，逐帧解析 \n\n 分隔的事件
+async function openSseStream(
+  url: string,
+  body: any,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
   const token = localStorage.getItem('access_token')
   if (!token) throw new Error('未登录')
 
-  const resp = await fetch(`/api/v1/chat/sessions/${sessionId}/messages/stream`, {
+  const resp = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
     signal,
   })
 
@@ -174,8 +231,6 @@ export async function sendMessageStream(
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-
-    // SSE 帧以 \n\n 分隔
     let sepIdx: number
     while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
       const rawEvent = buffer.slice(0, sepIdx)
@@ -183,8 +238,6 @@ export async function sendMessageStream(
       parseAndDispatch(rawEvent, handlers)
     }
   }
-
-  // flush 残余
   if (buffer.trim()) parseAndDispatch(buffer, handlers)
 }
 
@@ -206,6 +259,8 @@ function parseAndDispatch(rawEvent: string, handlers: StreamHandlers) {
     case 'status': handlers.onStatus?.(data); break
     case 'meta': handlers.onMeta?.(data); break
     case 'chunk': handlers.onChunk?.(data.text ?? ''); break
+    case 'approval_pending': handlers.onApprovalPending?.(data); break
+    case 'interrupt': handlers.onInterrupt?.(data); break
     case 'done': handlers.onDone?.(data); break
     case 'error': handlers.onError?.(data); break
   }

@@ -38,7 +38,9 @@ unstructured[pdf,pptx,docx]>=0.15.0   # 文档结构化解析（含 PDF / PPTX /
 jieba==0.42.1                     # 中文分词（BM25 关键词检索用）
 
 # ---------- 阶段三：Agent 引擎 ----------
-langgraph==0.2.34                 # Agent 状态机框架（核心）
+langgraph==0.3.34                 # Agent 状态机框架（核心，0.3.x 提供成熟的 interrupt() / Command API）
+langgraph-checkpoint-postgres==2.0.21  # PostgreSQL Checkpointer（断点续跑、人在回路审批）
+psycopg[binary]>=3.1.0            # langgraph-checkpoint-postgres 依赖（v3 异步驱动，与现有 psycopg2 共存）
 openai==1.57.0                    # 1.54 与 httpx 0.28+ 不兼容（proxies 参数已移除），1.57 修复
 tiktoken==0.8.0                   # Token 计算（摘要压缩判断阈值用）
 mcp>=1.2.0                        # Anthropic 官方 MCP SDK（双向集成）

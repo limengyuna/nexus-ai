@@ -41,9 +41,10 @@ def _push_meta(token_queue, state: AgentState) -> None:
 def fallback_node(state: AgentState) -> Dict[str, Any]:
     """闲聊 / 兜底节点"""
     started_at = time.time()
+    from app.agent.stream_queue import get_queue
     user_input = state.get("user_input", "")
     prev_error = state.get("error")
-    token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
+    token_queue = get_queue(state.get("session_id"))  # 真流式队列（仅 SSE 模式注入）
 
     # 上下文由 context_prep 统一注入到 state.context_messages
     messages = [

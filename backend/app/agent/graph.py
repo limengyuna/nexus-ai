@@ -76,8 +76,15 @@ def build_agent_graph():
     workflow.add_edge("rag_agent", "supervisor")
     workflow.add_edge("tool_agent", "supervisor")
 
-    compiled = workflow.compile()
-    logger.info("LangGraph Supervisor 主图编译完成 (节点: context_prep, supervisor, rag_agent, tool_agent; 循环: agent → supervisor)")
+    # 注入 Checkpointer：支持 interrupt() 暂停/恢复 + 跨进程持久化
+    from app.agent.checkpoint import get_checkpointer
+    checkpointer = get_checkpointer()
+    compiled = workflow.compile(checkpointer=checkpointer)
+    logger.info(
+        "LangGraph Supervisor 主图编译完成 (节点: context_prep, supervisor, rag_agent, tool_agent; "
+        "循环: agent → supervisor; checkpointer: {})",
+        type(checkpointer).__name__,
+    )
     return compiled
 
 

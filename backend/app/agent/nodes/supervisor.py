@@ -178,7 +178,8 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     kb_id = state.get("kb_id")
     user_id = state.get("user_id")
-    token_queue = state.get("_token_queue")
+    from app.agent.stream_queue import get_queue
+    token_queue = get_queue(state.get("session_id"))
     iterations = state.get("agent_iterations", 0)
     final_answer = state.get("final_answer", "")
     task_plan = state.get("task_plan", [])

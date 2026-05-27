@@ -274,6 +274,15 @@ async function regenerateLastAnswer() {
   }
 }
 
+// ---------- 工具审批操作 ----------
+async function handleApproval(action: 'approve' | 'reject') {
+  try {
+    await chat.resumeApproval(action)
+  } catch (e: any) {
+    toast.error(`审批操作失败: ${e?.message ?? '未知错误'}`)
+  }
+}
+
 function onKeyDown(e: KeyboardEvent) {
   // Enter 发送，Shift+Enter 换行
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -523,6 +532,58 @@ function onKeyDown(e: KeyboardEvent) {
           </button>
         </transition>
       </div>
+
+      <!-- 工具审批卡片（Agent 调用危险工具被 interrupt 时显示） -->
+      <transition
+        enter-active-class="transition-all duration-300 ease-out"
+        enter-from-class="opacity-0 translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition-all duration-200 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-4"
+      >
+        <div v-if="chat.pendingApproval" class="mx-6 mb-3 rounded-xl border border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 shadow-lg overflow-hidden">
+          <!-- 标题栏 -->
+          <div class="flex items-center gap-2 px-4 py-3 bg-amber-100/80 dark:bg-amber-800/40 border-b border-amber-200 dark:border-amber-700">
+            <span class="text-amber-600 dark:text-amber-400 text-lg">⚠️</span>
+            <span class="text-sm font-semibold text-amber-800 dark:text-amber-200">Agent 请求执行工具</span>
+            <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-700 text-amber-700 dark:text-amber-200 font-medium">
+              {{ chat.pendingApproval.payload.tool_kind }}
+            </span>
+          </div>
+          <!-- 内容 -->
+          <div class="px-4 py-3 space-y-2">
+            <div class="text-sm text-gray-700 dark:text-gray-200">
+              <span class="font-medium">{{ chat.pendingApproval.payload.message }}</span>
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">
+              工具名：<code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs">{{ chat.pendingApproval.payload.tool_name }}</code>
+            </div>
+            <!-- 参数预览（折叠式） -->
+            <details class="text-xs">
+              <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">查看参数详情</summary>
+              <pre class="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs overflow-x-auto max-h-32 text-gray-700 dark:text-gray-300">{{ JSON.stringify(chat.pendingApproval.payload.arguments, null, 2) }}</pre>
+            </details>
+          </div>
+          <!-- 操作按钮 -->
+          <div class="flex items-center gap-3 px-4 py-3 border-t border-amber-200 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-900/20">
+            <button
+              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors disabled:opacity-60"
+              :disabled="chat.sending"
+              @click="handleApproval('approve')"
+            >
+              ✓ 批准执行
+            </button>
+            <button
+              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-red-100 dark:bg-red-900/40 hover:bg-red-200 dark:hover:bg-red-800/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700 transition-colors disabled:opacity-60"
+              :disabled="chat.sending"
+              @click="handleApproval('reject')"
+            >
+              ✗ 拒绝
+            </button>
+          </div>
+        </div>
+      </transition>
 
       <!-- 错误提示 -->
       <div v-if="errorMsg" class="px-6 py-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs flex items-center justify-between">

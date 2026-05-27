@@ -133,9 +133,10 @@ def _invoke_mcp_tool(config_id: int, original_name: str, arguments: Dict[str, An
 
 def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, Any]:
     """LLM Function Calling 主循环（最多 6 轮，避免死循环）"""
+    from app.agent.stream_queue import get_queue
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
-    token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
+    token_queue = get_queue(state.get("session_id"))  # 真流式队列（仅 SSE 模式注入）
     llm = get_llm_fast()
 
     # 统一工具池：内部 Tool + MCP 外部工具 + Skill
@@ -267,6 +268,58 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 args = json.loads(tc["arguments"]) if tc["arguments"] else {}
             except json.JSONDecodeError:
                 args = {}
+
+            # ---------- 危险工具审批：在执行前 interrupt() ----------
+            # 先识别工具类型（用于判断 is_dangerous 和后续分发）
+            if tool_name.startswith("skill_"):
+                pre_kind = "skill"
+            elif tool_name in mcp_tool_map:
+                pre_kind = "mcp"
+            else:
+                pre_kind = "internal"
+
+            from app.agent.tools.danger import is_dangerous_tool, build_approval_payload
+            if is_dangerous_tool(tool_name, pre_kind):
+                # 通过 LangGraph interrupt() 暂停执行，等待外部审批
+                # 注意：节点会从头重跑，在此之前的代码（LLM 调用/已执行的安全工具）会重复执行
+                from langgraph.types import interrupt
+                payload = build_approval_payload(
+                    tool_name=tool_name,
+                    tool_kind=pre_kind,
+                    arguments=args,
+                    description=f"step {current_step} 准备调用 {pre_kind} 类工具",
+                )
+                logger.warning("[Tool Agent] 工具 {} ({}) 命中危险白名单，触发 interrupt 等待审批", tool_name, pre_kind)
+                # 流式队列推送一个事件，便于前端立即知道"将被中断"（可选体验提升）
+                if token_queue:
+                    token_queue.put(("approval_pending", payload))
+                # 调用 interrupt：首次调用抛 GraphInterrupt；resume 后此处返回 decision
+                decision = interrupt(payload)
+                # decision 形如：{"action": "approve"|"reject", "reason": "...", "edited_args": {...}}
+                action = (decision or {}).get("action", "reject")
+                if action != "approve":
+                    # 用户拒绝：把"被拒绝"作为工具结果返回给 LLM，让它继续推理
+                    reject_reason = (decision or {}).get("reason", "用户拒绝执行该工具")
+                    tool_result = {"error": f"用户拒绝执行该工具: {reject_reason}"}
+                    tool_call_records.append(ToolCallRecord(
+                        name=tool_name,
+                        kind=pre_kind,
+                        arguments=args,
+                        result=tool_result,
+                        step=current_step,
+                    ))
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps(tool_result, ensure_ascii=False),
+                    })
+                    logger.info("[Tool Agent] 用户拒绝调用 {}：{}", tool_name, reject_reason)
+                    continue  # 跳过本工具，处理下一个
+                # 用户允许：若提供了 edited_args，则用编辑后的参数继续执行
+                edited_args = (decision or {}).get("edited_args")
+                if edited_args:
+                    args = edited_args
+                logger.info("[Tool Agent] 用户批准调用 {}", tool_name)
 
             # 三类工具分发：Skill / MCP / 内部 Tool
             if tool_name.startswith("skill_"):

@@ -114,8 +114,11 @@ class AgentState(TypedDict, total=False):
     total_tokens: int                          # 本轮 Token 总消耗
     error: Optional[str]                       # 全局错误（fallback 节点设置）
 
-    # ---------- 流式推送（仅 SSE 模式注入） ----------
-    _token_queue: Any                          # queue.Queue，终端节点通过它实时推送 token 给前端
+    # ---------- 中断/审批（Checkpoint + Interrupt 机制） ----------
+    pending_approval: Optional[Dict[str, Any]] # 等待用户审批的危险操作详情（tool_agent 写入）
+    approval_decision: Optional[Dict[str, Any]] # 用户审批决定（resume 时由 Command 注入）
+    # 注：流式队列已从 state 移出，改用 app.agent.stream_queue 全局注册表
+    # 原因：queue.Queue 无法被 LangGraph Checkpointer 序列化
 
 
 # ---------- 工具函数 ----------
@@ -152,6 +155,8 @@ def make_initial_state(
         execution_trace=[],
         total_tokens=0,
         error=None,
+        pending_approval=None,
+        approval_decision=None,
     )
 
 

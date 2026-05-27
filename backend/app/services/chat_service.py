@@ -252,7 +252,11 @@ class ChatService:
             summary=effective_summary,
         )
         graph = get_agent_graph()
-        final_state = graph.invoke(initial_state)
+        # 每条用户消息独立 thread（方案 A）：thread_id = turn-{user_msg.id}
+        # 支持后续通过 resume 端点恢复（chat_once 路径下若中断，调用方需自行处理）
+        from app.agent.checkpoint import make_thread_config
+        thread_config = make_thread_config(user_msg.id)
+        final_state = graph.invoke(initial_state, config=thread_config)
 
         # 4. 保存 Agent 回复
         answer = final_state.get("final_answer", "") or "（无输出）"
@@ -322,6 +326,55 @@ class ChatService:
 
         return assistant_msg, final_state
 
+    # ---------- 流式辅助：消费 token_queue → yield SSE 事件 ----------
+    @staticmethod
+    async def _consume_stream_queue(token_queue, graph_task):
+        """
+        消费节点推送的流式事件，转成 SSE 元组 yield 出去。
+
+        终止条件（任一满足即返回）：
+        - 收到 ("done", None) 事件
+        - graph_task 已完成（含异常退出 / 触发 interrupt 后的提前返回）
+
+        被 chat_stream 和 chat_resume_stream 共用。
+        """
+        import asyncio
+        import queue as queue_mod
+
+        stream_done = False
+        while not stream_done:
+            has_event = False
+            while True:
+                try:
+                    event_type, data = token_queue.get_nowait()
+                    has_event = True
+                except queue_mod.Empty:
+                    break
+                if event_type == "meta":
+                    yield ("meta", data)
+                elif event_type == "chunk":
+                    yield ("chunk", {"text": data})
+                elif event_type == "approval_pending":
+                    # tool_agent 在 interrupt() 之前推送的"即将中断"提示（可选体验）
+                    yield ("approval_pending", data)
+                elif event_type == "done":
+                    stream_done = True
+                    break
+
+            if stream_done:
+                break
+
+            # 图异常退出 / interrupt 触发：graph_task 提前完成
+            if graph_task.done():
+                exc = graph_task.exception()
+                if exc:
+                    logger.error("[ChatService] Agent graph 异常退出: {}", exc)
+                    yield ("chunk", {"text": f"\n\n[Agent 执行出错: {exc}]"})
+                break
+
+            if not has_event:
+                await asyncio.sleep(0.02)
+
     # ---------- 流式版本（SSE）----------
     @staticmethod
     async def chat_stream(
@@ -388,45 +441,25 @@ class ChatService:
             kb_id=session.kb_id,
             summary=effective_summary,
         )
-        initial_state["_token_queue"] = token_queue  # 注入流式队列
+        # 流式队列注册到全局表（state 不再持有 Queue，避免 Checkpointer 序列化失败）
+        from app.agent.stream_queue import register_queue, unregister_queue
+        from app.agent.checkpoint import make_thread_config
+        register_queue(session.id, token_queue)
+        thread_config = make_thread_config(user_msg.id)
 
         graph = get_agent_graph()
 
         # ---------- 4. 后台线程执行 LangGraph，同时消费队列 ----------
-        graph_task = asyncio.ensure_future(asyncio.to_thread(graph.invoke, initial_state))
+        graph_task = asyncio.ensure_future(
+            asyncio.to_thread(graph.invoke, initial_state, thread_config)
+        )
 
-        stream_done = False
-        while not stream_done:
-            # 批量取出队列中所有可用事件
-            has_event = False
-            while True:
-                try:
-                    event_type, data = token_queue.get_nowait()
-                    has_event = True
-                except queue_mod.Empty:
-                    break
-                if event_type == "meta":
-                    yield ("meta", data)
-                elif event_type == "chunk":
-                    yield ("chunk", {"text": data})
-                elif event_type == "done":
-                    stream_done = True
-                    break
-
-            if stream_done:
-                break
-
-            # 检查图是否已异常退出（未发 done 信号）
-            if graph_task.done():
-                exc = graph_task.exception()
-                if exc:
-                    logger.error("[ChatService] Agent graph 异常退出: {}", exc)
-                    yield ("chunk", {"text": f"\n\n[Agent 执行出错: {exc}]"})
-                break
-
-            # 没有事件时短暂让出事件循环
-            if not has_event:
-                await asyncio.sleep(0.02)
+        try:
+            async for ev in ChatService._consume_stream_queue(token_queue, graph_task):
+                yield ev
+        finally:
+            # 流式结束（无论正常/异常）必须注销队列，避免内存泄漏
+            unregister_queue(session.id)
 
         # ---------- 5. 等待图执行完成，获取完整 state ----------
         try:
@@ -434,6 +467,28 @@ class ChatService:
         except Exception as e:
             logger.exception("[ChatService] Agent graph 执行失败: {}", e)
             final_state = initial_state  # 降级
+
+        # ---------- 5.1 检测 interrupt：图未真正结束，等待用户审批 ----------
+        # LangGraph 0.3.x：graph.invoke() 返回值不含 __interrupt__，
+        # 必须通过 graph.get_state(config) 获取 StateSnapshot 来检测中断
+        state_snapshot = await asyncio.to_thread(graph.get_state, thread_config)
+        if state_snapshot.next:
+            # state_snapshot.next 非空 → 图还有待执行节点，说明被 interrupt 了
+            interrupt_value = None
+            for task in (state_snapshot.tasks or []):
+                if hasattr(task, 'interrupts') and task.interrupts:
+                    interrupt_value = task.interrupts[0].value
+                    break
+            if interrupt_value is None:
+                interrupt_value = {"message": "Agent 执行被中断，请审批后继续"}
+            logger.info("[ChatService] 检测到 interrupt，等待用户审批: {}", interrupt_value)
+            yield ("interrupt", {
+                "user_msg_id": user_msg.id,           # 前端 resume 时传回，定位 thread_id
+                "session_id": session.id,
+                "payload": interrupt_value,           # build_approval_payload 构造的内容
+            })
+            # 不保存 assistant message（对话未完成），直接返回；后续靠 chat_resume_stream
+            return
 
         # ---------- 6. 保存 assistant 消息 ----------
         answer = final_state.get("final_answer", "") or "（无输出）"
@@ -529,5 +584,176 @@ class ChatService:
                 "faithfulness": faithfulness,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
                 "agent_source": src.value if hasattr(src, "value") else str(src),
+            },
+        )
+
+    # ---------- 流式版本（SSE）—— 中断恢复 ----------
+    @staticmethod
+    async def chat_resume_stream(
+        db: Session,
+        session: ChatSession,
+        user_msg_id: int,
+        decision: dict,
+    ):
+        """
+        恢复一个被 interrupt() 暂停的对话轮次。
+
+        :param session: 会话对象
+        :param user_msg_id: 原始用户消息 ID（用于定位 thread_id）
+        :param decision: 用户审批决定，形如：
+            {"action": "approve"|"reject", "reason": "...", "edited_args": {...}}
+
+        事件序列与 chat_stream 相同：可能再次产生 interrupt 事件（多次审批场景）。
+        """
+        import asyncio
+        import queue as queue_mod
+        from app.agent.graph import get_agent_graph
+        from app.agent.stream_queue import register_queue, unregister_queue
+        from app.agent.checkpoint import make_thread_config
+        from langgraph.types import Command
+
+        # 校验原 user_msg 存在且属于本 session
+        user_msg = db.get(ChatMessage, user_msg_id)
+        if user_msg is None or user_msg.session_id != session.id:
+            yield ("chunk", {"text": f"\n\n[恢复失败：未找到 user_msg_id={user_msg_id}]"})
+            return
+        user_input = user_msg.content
+
+        yield ("status", {"step": "resuming", "user_msg_id": user_msg_id})
+
+        # 准备流式队列与 thread 配置
+        token_queue: queue_mod.Queue = queue_mod.Queue()
+        register_queue(session.id, token_queue)
+        thread_config = make_thread_config(user_msg_id)
+
+        graph = get_agent_graph()
+
+        logger.info(
+            "[ChatService.resume] start: session={}, user_msg_id={}, decision={}",
+            session.id, user_msg_id, decision,
+        )
+
+        # 关键：用 Command(resume=...) 恢复，而不是传新 state
+        # LangGraph 会从 checkpointer 加载该 thread 的最后一个 checkpoint，
+        # 在 interrupt() 点继续执行，并把 decision 作为 interrupt 的返回值
+        graph_task = asyncio.ensure_future(
+            asyncio.to_thread(graph.invoke, Command(resume=decision), thread_config)
+        )
+
+        event_count = 0
+        try:
+            async for ev in ChatService._consume_stream_queue(token_queue, graph_task):
+                event_count += 1
+                logger.debug("[ChatService.resume] yield event #{}: type={}", event_count, ev[0])
+                yield ev
+        finally:
+            unregister_queue(session.id)
+            logger.info("[ChatService.resume] consume queue end, total events yielded: {}", event_count)
+
+        # 等待图执行完成
+        try:
+            final_state = await graph_task
+        except Exception as e:
+            logger.exception("[ChatService] resume graph 执行失败: {}", e)
+            yield ("chunk", {"text": f"\n\n[恢复执行出错: {e}]"})
+            return
+
+        # 二次中断检测（多次审批场景）
+        # 同样通过 graph.get_state() 检测，而非检查返回值中的 __interrupt__
+        state_snapshot = await asyncio.to_thread(graph.get_state, thread_config)
+        if state_snapshot.next:
+            interrupt_value = None
+            for task in (state_snapshot.tasks or []):
+                if hasattr(task, 'interrupts') and task.interrupts:
+                    interrupt_value = task.interrupts[0].value
+                    break
+            if interrupt_value is None:
+                interrupt_value = {"message": "Agent 执行被中断，请审批后继续"}
+            logger.info("[ChatService] resume 后再次 interrupt: {}", interrupt_value)
+            yield ("interrupt", {
+                "user_msg_id": user_msg_id,
+                "session_id": session.id,
+                "payload": interrupt_value,
+            })
+            return
+
+        # ---------- 保存 assistant 消息（与 chat_stream 后半段一致）----------
+        answer = final_state.get("final_answer", "") or "（无输出）"
+        intent = final_state.get("intent", "")
+        if intent == "rag":
+            src = AgentSource.RAG
+        elif intent == "tool":
+            src = AgentSource.TOOL
+        else:
+            src = AgentSource.ROUTER
+
+        tool_calls_payload = None
+        try:
+            tool_calls_payload = json.loads(
+                json.dumps(final_state.get("tool_calls", []), default=str)
+            )
+        except Exception:
+            tool_calls_payload = [{"error": "serialization_failed"}]
+
+        assistant_msg = ChatMessage(
+            session_id=session.id,
+            role=MessageRole.ASSISTANT,
+            content=answer,
+            agent_source=src,
+            tool_calls_json=tool_calls_payload,
+            token_usage=final_state.get("total_tokens", 0) or None,
+        )
+        db.add(assistant_msg)
+        if session.title == "新对话":
+            session.title = user_input[:30] + ("…" if len(user_input) > 30 else "")
+        db.commit()
+        db.refresh(assistant_msg)
+
+        # L2 记忆触发（与 chat_stream 一致）
+        tool_calls = final_state.get("tool_calls", [])
+        error_calls = [tc for tc in tool_calls if tc.get("error")]
+        if error_calls:
+            try:
+                from app.memory.tasks import start_async_extract_error_facts
+                start_async_extract_error_facts(
+                    user_id=session.user_id, session_id=session.id,
+                    user_input=user_input, error_calls=error_calls, kb_id=session.kb_id,
+                )
+            except Exception as e:
+                logger.error("[Memory Integration] resume 异步触发工具错误事实失败: {}", e)
+        try:
+            from app.memory.tasks import start_async_extract_turn_facts
+            start_async_extract_turn_facts(
+                user_id=session.user_id, session_id=session.id,
+                user_input=user_input, assistant_answer=answer, kb_id=session.kb_id,
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] resume 异步触发每轮事实失败: {}", e)
+
+        # 发送 done
+        yield (
+            "done",
+            {
+                "message_id": assistant_msg.id,
+                "session_id": session.id,
+                "tool_calls": tool_calls_payload or [],
+                "execution_trace": json.loads(
+                    json.dumps(final_state.get("execution_trace", []), default=str)
+                ),
+                "retrieved_docs": json.loads(
+                    json.dumps(final_state.get("retrieved_docs", []), default=str)
+                ),
+                "retrieved_memories": json.loads(
+                    json.dumps(final_state.get("retrieved_memories", []), default=str)
+                ),
+                "task_plan": json.loads(
+                    json.dumps(final_state.get("task_plan", []), default=str)
+                ),
+                "faithfulness": json.loads(
+                    json.dumps(final_state.get("faithfulness", {}), default=str)
+                ),
+                "token_usage": final_state.get("total_tokens", 0) or 0,
+                "agent_source": src.value if hasattr(src, "value") else str(src),
+                "resumed": True,
             },
         )

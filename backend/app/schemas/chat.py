@@ -54,6 +54,14 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
 
 
+class ChatResumeRequest(BaseModel):
+    """中断恢复请求（用户审批后调用）"""
+    user_msg_id: int = Field(..., description="被中断对话轮次对应的原始用户消息 ID（thread_id 来源）")
+    action: str = Field(..., pattern="^(approve|reject)$", description="审批动作：approve / reject")
+    reason: Optional[str] = Field(None, max_length=500, description="拒绝/批准理由（可选，发给 LLM 作为上下文）")
+    edited_args: Optional[dict] = Field(None, description="批准时可选：用户编辑后的工具参数（如修改文件路径）")
+
+
 class ChatResponse(BaseModel):
     """非流式对话响应（含完整 Agent 思考过程，便于前端展示）"""
     message: ChatMessageOut                   # Agent 回复消息

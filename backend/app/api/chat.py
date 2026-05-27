@@ -27,6 +27,7 @@ from app.schemas.chat import (
     ChatMessageOut,
     ChatRequest,
     ChatResponse,
+    ChatResumeRequest,
     ChatSessionCreate,
     ChatSessionOut,
     ChatSessionUpdate,
@@ -239,5 +240,67 @@ async def stream_message(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # 让 nginx 等不要缓冲
+        },
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/resume",
+    summary="中断恢复（SSE 流式）—— 用户审批后继续执行 Agent",
+)
+@limiter.limit(LIMIT_LLM)
+async def resume_message(
+    request: Request,
+    session_id: int,
+    payload: ChatResumeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    中断恢复端点。与 /messages/stream 对称，同样返回 SSE 流。
+
+    应用场景：Agent 调用危险工具时出现 interrupt 事件，
+    用户点击「批准 / 拒绝」后，前端调用本端点传递决定，
+    后端从 checkpoint 中恢复执行并推送后续 token。
+    """
+    session = ChatService.get_session(db, session_id)
+    if session is None or session.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    target_session_id = session.id
+    target_user_id = current_user.id
+    user_msg_id = payload.user_msg_id
+    decision = {
+        "action": payload.action,
+        "reason": payload.reason or "",
+        "edited_args": payload.edited_args,
+    }
+
+    async def event_generator():
+        from app.core.database import SessionLocal
+        local_db = SessionLocal()
+        try:
+            local_session = ChatService.get_session(local_db, target_session_id)
+            if local_session is None or local_session.user_id != target_user_id:
+                err = json.dumps({"message": "会话不存在或无权访问", "type": "NotFound"})
+                yield f"event: error\ndata: {err}\n\n"
+                return
+            async for event_type, data in ChatService.chat_resume_stream(
+                local_db, local_session, user_msg_id, decision,
+            ):
+                payload_json = json.dumps(data, ensure_ascii=False, default=str)
+                yield f"event: {event_type}\ndata: {payload_json}\n\n"
+        except Exception as e:
+            err_payload = json.dumps({"message": str(e), "type": type(e).__name__})
+            yield f"event: error\ndata: {err_payload}\n\n"
+        finally:
+            local_db.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )

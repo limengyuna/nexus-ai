@@ -218,7 +218,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     context_messages = state.get("context_messages", [])
     history_text = _extract_history_text(context_messages)
 
-    token_queue = state.get("_token_queue")  # 提前取出，所有路径都可能需要
+    from app.agent.stream_queue import get_queue
+    token_queue = get_queue(state.get("session_id"))  # 提前取出，所有路径都可能需要
 
     def _push_early_return(answer: str):
         """early return 时推送 chunk（不发 done，由 Supervisor 统一控制）"""
@@ -384,7 +385,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             rag_messages.append(msg)
     rag_messages.append({"role": "user", "content": user_prompt})
 
-    token_queue = state.get("_token_queue")  # 真流式队列（仅 SSE 模式注入）
+    # token_queue 已在节点入口处获取（来自全局注册表）
 
     try:
         if token_queue:
