@@ -17,6 +17,8 @@
 - `recommended_skill` 只在意图明确时才填，不确定时填 null 让 Tool Agent 自行决策
 - Tool Agent 的强制执行兜底了 Router 推荐准确时的参数安全问题
 
+**⚠️ 重要说明**：Router 节点代码已实现但**目前未接入主流程**，系统直接走 Supervisor 统一调度。如果面试官问 Router，可以说"这是早期设计的轻量级分流方案，后来发现 Supervisor 本身就能处理意图分类（闲聊直接回答），所以目前只用 Supervisor，Router 保留作为未来优化选项"。
+
 ### Q2：RAG Agent 检索到低质量内容怎么处理？
 
 **答**（已实现完整方案）：
@@ -62,7 +64,7 @@
 
 **为什么选这个方案**：比固定长度切分更灵活，能最大程度保证语义相关的内容在同一个 chunk 里不被截断，提升 RAG 检索质量。
 
-### Q5：MCP Server 暴露了哪些内容？传输层用什么？为什么？
+### Q5：MCP Server 暴露了哪些内容？传输层用什么？Client 端怎么做的？
 
 **答**：暴露了三类 MCP 原语：
 - **Resources**：知识库列表 + 单个知识库元数据读取
@@ -71,6 +73,14 @@
 
 传输层用 stdio，原因：
 > "Server 端用 stdio 是因为目标场景是本地客户端（Claude Desktop / Cursor 都在本机运行），stdio 是进程间通信，延迟最低、无需网络配置。Client 端同时支持 stdio 和 SSE 两种，根据外部 MCP Server 的配置自动选择。"
+
+**追问：Client 端 MCP 工具怎么挂载和管理的？**
+
+> "Client 端的核心设计是**整个 MCP Server 作为一个工具整体挂载**，而不是把子工具逐个拆开注册。每个 MCP 的描述由 LLM 在创建时自动生成——前端点击'测试连接'后预拉取全部子工具列表，LLM 根据子工具的名称和描述精炼出一句 30-80 字的整体功能描述，写入数据库。
+>
+> Supervisor 在做任务规划时，直接从 PostgreSQL 读取各 MCP 的名称和描述注入 prompt，就像 Skill 一样作为能力选项出现，决策速度是 0ms 级别。Tool Agent 执行时也是从数据库的 `cached_tools` 字段读取子工具 schema，而不是每次都去实时连接外部 Server。只有在用户主动点击'强制刷新'时才重新连接拉取并更新缓存。
+>
+> 这样做的好处是：即使外部 MCP Server 暂时不可用（比如 npx 网络不通），Supervisor 的规划和 Tool Agent 的工具注册都不受影响，系统的鲁棒性大幅提升。"
 
 ### Q6：SQL 优化和缓存策略具体做了什么？30% 怎么量化的？
 
@@ -136,22 +146,27 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 
 ### Q10：怎么提升 RAG 检索准确率的？⭐ 高频题，必须能完整讲出来
 
-**标准回答**（按问题→排查→解决的故事线）：
+**标准回答**（按问题→排查→解决的故事线，分四层优化）：
 
-> "我把论文上传知识库后，发现用户问'国内外研究现状'这种章节标题类问题时，LLM 回答质量很差。排查发现是**召回阶段就没命中正确的 chunk**。
+> "我做了四层递进优化，每层解决不同维度的问题：
 >
-> 第一步我改造了 Word 解析器——识别文档的 Heading 样式（包括自定义样式，用模糊匹配兜底），转成 Markdown 标题标记，再用 MarkdownHeaderSplitter 按标题层级分块，metadata 里自动带上 header_path。
+> **第一层：文档解析**——用 unstructured 库做结构化解析，识别文档元素类型（Title / NarrativeText / Table）。针对中文文档额外写了正则增强（`_enhance_chinese_headings`），把'第X章'、'（一）'等中文编号模式提升为正确的标题级别。解析后转成 Markdown 格式，保留层级结构。
 >
-> 但效果仍然不好。深入分析发现：一个 500 字的 chunk，标题只占 10 个字，**embedding 向量被正文语义主导**，搜'设计背景'时向量距离反而不是最近的。于是我做了 **Contextual Embedding**——向量化时把 header_path 拼到 chunk 前面（如 `[绪论 > 1.1 设计背景与意义] 正文...`），让标题在 embedding 输入中的占比提升，但存储的原文不变。这是参考 Anthropic 的 Contextual Retrieval 方案。
+> **第二层：分块策略**——用 MarkdownHeaderSplitter 按标题层级分块，metadata 里自动带上 header_path。实现了 **Parent-Child 分块策略**：大块（800-2000字）作为 parent，超长时再切成 child（300-500字），child 的 metadata 记录 parent_content。检索时匹配小的 child 块（精准），但给 LLM 送完整的 parent 块（上下文完整）——**检索精度和上下文完整性解耦**。
 >
-> 后来还加了**双路召回**：向量语义检索 + 自实现 BM25 关键词检索，通过 RRF 算法融合两路排名。BM25 纯 Python 实现，查询时动态构建倒排索引，避免引入 Elasticsearch。这样对精确关键词的匹配能力显著增强。"
+> **第三层：向量化优化**——做了 **Contextual Embedding**：向量化时把 header_path 拼到 chunk 前面（如 `[绪论 > 1.1 设计背景] 正文...`），解决 embedding 被正文语义主导、标题类查询召回率低的问题。参考 Anthropic 的 Contextual Retrieval 方案。
+>
+> **第四层：检索精排**——向量 + BM25 双路召回通过 RRF 融合取 top_k=15 个候选，再用 **Cross-Encoder（gte-rerank-v2）精排**取 top_n=6 给 LLM。Cross-Encoder 把 query 和 document 拼在一起做联合编码，精度远高于向量检索，解决了粗排不够精准的问题。
+>
+> 整体思路是**每一层都在提升信噪比**：解析去噪 → 分块聚焦 → 向量化增强 → 检索精排 → 最终送给 LLM 的是高质量、完整的相关内容。"
 
 **关键术语**（必须自然说出来）：
+- unstructured 结构化解析 + 中文标题正则增强
+- Parent-Child 分块（检索粒度和上下文粒度解耦）
 - Contextual Embedding / 上下文注入
 - embedding 向量被正文语义主导
-- MarkdownHeaderSplitter + header_path
-- 双路召回（Dense + Sparse）
-- RRF（Reciprocal Rank Fusion）互惠排名融合
+- 双路召回（Dense + Sparse）+ RRF 融合
+- Cross-Encoder 精排（粗排+精排两阶段）
 
 **⚠️ 致命错误**：不要说"增加了标题的向量权重"——你没有改模型权重，你改的是**喂给模型的输入文本**。
 
@@ -168,6 +183,25 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 
 **追问：怎么确保改写质量？**
 > "temperature=0 保证确定性，max_tokens=200 限制输出长度，有 try-catch 兜底——改写失败就直接用原始查询。另外加了日志打印改写前后对比，方便排查。"
+
+**追问：每次都调 LLM 改写不会太慢吗？有没有想过更细粒度的可控策略？**
+> "考虑过的。我做了**第一道闸门**——首轮没有对话历史时直接跳过改写，零 LLM 调用。
+>
+> 还考虑过更激进的方案：在调 LLM 前用关键词检测（'它'、'这个'、'刚才'等指代词）判断是否需要改写——理论上能减少 60% 的改写调用。但**最终没做**，因为中文对话里有大量**主语省略**的延续问题，比如用户问'限制是什么'、'为什么'、'还有呢'，没有显式指代词但实际是延续问题。规则检测会漏判这些场景，损害检索质量。
+>
+> 检索是 RAG 的命脉，宁可多花 800ms 让 LLM 在 prompt 里自己判断（已经明确的就原样输出），也不要因为关键词漏判导致检索质量下滑。这是一个**质量优先于延迟**的有意识 trade-off。"
+
+**追问（高阶）：还有什么提升召回率的高级技术？**
+> "**HyDE**（Hypothetical Document Embeddings）是一个有意思的思路——先让 LLM 根据用户 query 生成一段假设性回答，再用这段回答去做向量检索，而不是用原始 query。
+>
+> 原理是：query 通常是问句风格（'驾照视力要求是什么'），而知识库 document 是陈述句风格（'申请机动车驾驶证应当符合的身体条件包括视力...'），两者语义相同但**风格不对称**，向量距离可能不够近。让 LLM 先把 query 改写成陈述句风格的假设回答，能让检索向量更接近真实 document 的分布，提升召回。
+>
+> 我没用 HyDE 主要因为：**第一**，我已经有 BM25 关键词检索作为双路兜底，能弥补语义检索的风格差异问题；**第二**，HyDE 多一次 LLM 调用会增加 1 秒左右延迟，对实时问答影响明显；**第三**，如果 LLM 生成的假设回答有幻觉偏差，反而会污染检索。HyDE 真正适合**纯向量检索 + 长篇学术文档**的场景，跟我的多源混合检索系统不太匹配。"
+
+**关键术语**：
+- HyDE = Hypothetical Document Embeddings（CMU 2022 提出）
+- query-document 风格不对称问题
+- 改写可控的多级闸门（无 history 跳过 / 关键词预检测 / LLM 自判）
 
 ### Q12：双路召回 + RRF 具体怎么实现的？为什么不用 Elasticsearch？
 
@@ -196,25 +230,48 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 **追问：这个是哪个 Skill 实现的？**
 > "DocumentSummarizerSkill。它有两种模式：用户问具体主题时走 multi-query RAG（拆子查询多路检索），用户要求'总结全文/整篇文档'时走 Map-Reduce。通过分析用户输入中的关键词（'全文'、'整篇'、'总结一下这篇文档'）来选择模式。"
 
-### Q14：非结构化文档（Word）怎么保留标题层级？
+### Q14：非结构化文档（Word/PDF）怎么解析并保留标题层级？
 
 **答**：
 
-> "Word 文档用 python-docx 解析，遍历每个段落的 `style.name` 属性。用一个映射表把标准样式转为 Markdown 标题：'Heading 1'→'#'、'Heading 2'→'##'、'标题 1'→'#' 等。对于自定义样式（如'章节 二级标题'），用模糊匹配兜底——样式名包含'heading'或'标题'关键词就提取其中的数字作为层级。另外用正则过滤掉目录条目（匹配'标题文字...页码'的 TOC 格式），避免目录内容污染语义 chunk。"
+> "我用 unstructured 库做结构化文档解析——它能识别文档中的元素类型（Title / NarrativeText / Table / ListItem 等），保留层级关系。解析后把每个元素按类型转成 Markdown 格式：Title 转为对应层级的 `#` 标题，Table 转为 Markdown 表格，NarrativeText 保留段落。
+>
+> 但 unstructured 对中文文档的标题识别不够好——比如'第一章'、'（一）'、'1.1 概述'这类中文法规常见的编号标题，它可能识别为普通段落。所以我额外写了 `_enhance_chinese_headings()` 函数，用正则匹配常见的中文编号模式（'第X章'→h1、'第X节'→h2、'（一）'→h3、'1.1'→h2 等），把被错误识别的段落提升为正确的标题级别。这样后续 MarkdownHeaderSplitter 就能按结构精确分块。"
 
-**追问：为什么不直接用 LangChain 的 Document Loader？**
-> "LangChain 的 UnstructuredWordDocumentLoader 也是基于 python-docx，但它默认只提取纯文本，不保留标题层级信息。我需要把标题转成 Markdown 格式，后续才能用 MarkdownHeaderSplitter 按结构分块、在 metadata 里保留 header_path。这是定制需求，通用 Loader 做不到。"
+**追问：为什么不直接用 python-docx？**
+> "python-docx 只能处理 .docx，不支持 PDF、RTF 等格式。unstructured 统一了多种格式的解析入口（底层按格式调用不同引擎：docx 用 python-docx、PDF 用 pdfminer、PPT 用 python-pptx 等），并且自带元素类型识别。我只需要在它的基础上做中文增强就够了，不用针对每种格式写解析逻辑。"
 
-### Q15：为什么不加 Reranker（重排模型）？
+**追问：表格怎么处理的？**
+> "unstructured 识别出 Table 元素后，如果元素自带 HTML 格式，我会解析 HTML 的 `<tr>/<td>` 标签转成 Markdown 表格格式（`| col1 | col2 |`）。如果没有 HTML，就直接用元素的纯文本内容。保留表格结构的好处是 LLM 能更好地理解表格内的对应关系，比如'视力要求 → 对应车型'这种映射。"
+
+### Q15：Reranker 重排模型怎么实现的？为什么要加？⭐
 
 **答**：
 
-> "目前没有引入 Cross-Encoder 重排。双路召回 + RRF + Contextual Embedding 的效果已经满足需求。如果要加，我会选 bge-reranker-v2 做 Cross-Encoder 精排，放在 RRF 之后取 top-k 之前。但它会增加 100-200ms 延迟，需要权衡实时性。"
+> "我实现了**粗排+精排的两阶段架构**。粗排阶段：向量 + BM25 双路检索通过 RRF 融合，取 top_k=15 个候选。精排阶段：用通义 gte-rerank-v2（Cross-Encoder）对 15 个候选逐个与 query 做联合编码，按相关性重新排序，取 top_n=6 给 LLM。
+>
+> 加 Reranker 的原因：向量检索用的是 Bi-Encoder——query 和 document 分别编码成向量再算距离，速度快但精度有限，因为编码时看不到对方。Cross-Encoder 把 query 和 document 拼在一起做联合编码，能捕捉词级别的语义交互，精度远高于向量检索。但它计算量大，不能对全库跑，只适合对少量候选精排。
+>
+> 实测效果：加了 Reranker 后，送入 LLM 的 5 个 chunk 相关性明显提升，尤其是原来排在 #4、#5 的正确结果，经过精排后被提到 #1、#2。"
 
-**追问：Reranker 和 Embedding 检索有什么区别？**
-> "Embedding 检索用的是 Bi-Encoder（双塔模型）——query 和 doc 分别编码成向量再算距离，速度快但精度一般。Reranker 用 Cross-Encoder（交叉编码器）——把 query 和 doc 拼在一起输入 BERT，能捕捉更细粒度的交互特征，精度高但速度慢，不适合全量检索，只适合对候选集精排。所以典型 RAG 管道是：召回（Bi-Encoder）→ 重排（Cross-Encoder）→ 生成（LLM）。"
+**追问：为什么用 gte-rerank-v2 而不是 bge-reranker？**
+> "gte-rerank-v2 是通义 DashScope 的云端 API，和我们已有的 Embedding API（text-embedding-v4）同属一个平台，共用一个 API Key，部署零成本。bge-reranker 需要本地部署模型（需要 GPU），对我这个项目规模来说过重了。"
 
-**注意**：不要假装有重排，但要展示你懂这个环节、知道 trade-off。
+**追问：Reranker 增加了多少延迟？**
+> "gte-rerank-v2 对 10 个候选的精排耗时约 200-400ms，相比 LLM 生成的几秒钟可以接受。而且粗排多召回、精排精筛选的策略，让整体回答质量的提升远超这点延迟成本。"
+
+**追问（高阶）：除了 Cross-Encoder，工业搜索还有什么排序方案？为什么不用？**
+> "工业级最经典的方案是 **Learning to Rank（LTR）**，代表算法是 **LambdaMART**——基于 GBDT 的有监督排序模型。它把 query 和 document 的几十维特征（BM25 分、向量相似度、文档长度、点击率、新鲜度、PageRank 等）作为输入，用 Multiple Additive Regression Trees 学习排序函数，直接优化 NDCG 等排序指标。百度、Bing、淘宝搜索都在用这套方案。
+>
+> 我没用 LambdaMART 主要因为两点：**第一是缺少训练数据**——它需要人工标注的相关性数据或大量真实用户的点击日志，个人项目无法获得；**第二是规模不匹配**——我的知识库在千级 chunk，Cross-Encoder 精排已经达到很好的精度，引入 LambdaMART 需要大量特征工程和 ensemble 调优，属于过度工程。
+>
+> 如果未来知识库扩到百万级、有真实用户的点击数据，**LambdaMART 是合理的下一步**——可以把 Cross-Encoder 的输出作为它的一个特征，把多路信号一起做 ensemble，在精度上还能再上一个台阶。"
+
+**关键术语**（高阶答法用）：
+- Learning to Rank（LTR）—— 学习排序
+- LambdaMART = LambdaRank + MART（GBDT 排序）
+- 直接优化 NDCG/MAP 等不可导排序指标
+- Pointwise / Pairwise / Listwise 三种训练范式（LambdaMART 属于 Listwise）
 
 ---
 
@@ -405,7 +462,7 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 > 原理是用预训练的神经网络（如 BERT 家族）把输入文本编码为固定长度的向量。训练时用对比学习——让同义句的向量靠近、不相关句子的向量远离。推理时直接取模型某一层的输出作为向量表示。
 >
 > 在我的项目里用了两种 Embedding：
-> - **通义 text-embedding-v3**：用于 RAG 文档向量化和查询向量化，1024 维
+> - **通义 text-embedding-v4**：用于 RAG 文档向量化和查询向量化，1024 维
 > - **同一个模型也用于 L2 记忆的向量化**：存入 ChromaDB 后按余弦距离检索
 >
 > 关键理解：Embedding 不是关键词匹配，而是语义匹配——'如何部署'和'怎么上线'虽然没有共同关键词，但向量距离很近。这就是为什么向量检索能补充 BM25 关键词检索做不到的事。"
@@ -415,7 +472,7 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 >
 > Cross-Encoder（交叉编码）：把 query 和 document 拼在一起输入 BERT，模型能看到两者的细粒度交互（如词级别的对齐）。精度高但不能预计算，每个 query-document 对都要跑一次模型，只适合对少量候选做精排。
 >
-> 所以典型 RAG 管道是：Bi-Encoder 做粗召回（快）→ Cross-Encoder 做精排（准）→ LLM 生成答案。我的项目目前只做了粗召回没加精排，是因为双路召回 + RRF + Contextual Embedding 的效果已经够用。"
+> 所以典型 RAG 管道是：Bi-Encoder 做粗召回（快）→ Cross-Encoder 做精排（准）→ LLM 生成答案。我的项目完整实现了这个管道——向量+BM25 双路 RRF 融合粗召回 top_k=15，再用 gte-rerank-v2（Cross-Encoder）精排取 top_n=6 给 LLM。"
 
 ### Q27：Temperature 和 Top-p 是什么？你项目里怎么设的？
 
@@ -468,4 +525,455 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 > - Prompt 方式：'如果用户问天气，请输出 JSON 格式 {"tool": "weather", "city": "xx"}'——模型可能输出格式不对、幻觉、加多余文字
 > - Function Calling：模型原生支持结构化输出，格式稳定，有专门的 stop reason 标识'我要调用函数'
 >
-> 在我的项目里，Tool Agent 就是基于 Function Calling 实现的——把 49 个工具（内部 + Skill + MCP）的 schema 传给模型，模型自主选择调用哪个。"
+> 在我的项目里，Tool Agent 就是基于 Function Calling 实现的——把内部工具 + Skill + MCP 外部工具（从数据库缓存读取）的 schema 统一传给模型，模型自主选择调用哪个。MCP 子工具在创建时就已预缓存到 PostgreSQL，运行时直接读 DB 拼装 schema，不发起任何外部连接。"
+
+---
+
+## 第八轮：Supervisor 动态调度 + MCP 缓存架构
+
+### Q30：Supervisor 是怎么做任务规划的？和 Router 什么关系？⭐
+
+**答**：
+
+> "Supervisor 是多 Agent 协作的调度中心，基于 LLM 动态规划。整个流程分两个阶段：
+>
+> **规划阶段**（首轮 iterations=0）：把用户请求 + 可用能力清单（RAG Agent、Tool Agent 的 Skills 和 MCP 服务描述）注入 prompt，LLM 输出一个 JSON，包含 `task_plan`（步骤列表）和第一步要分发到的 `next_agent`。每个步骤有 `step_id`、`description`、`agent`、`status` 字段。如果是闲聊或简单问答，LLM 判断不需要子 Agent，直接输出 `direct_response` 自己回答。
+>
+> **执行阶段**（后续轮）：子 Agent 完成后，Supervisor 拿到执行结果，LLM 判断是按原计划继续下一步、还是需要调整计划（比如前一步失败了要换方案），输出更新后的 `task_plan` 和下一个 `next_agent`，或者输出 `FINISH` 表示全部完成。
+>
+> 和 Router 的关系：Router 是**单步意图分类器**的设计思路，只看当前这一句话该走哪个 Agent；Supervisor 是**多步任务编排器**，能把复合请求拆成多步计划依次执行。比如用户说'查天气然后写入文件'，Router 只能选一个方向，而 Supervisor 能拆成两步分别派给 Tool Agent。**目前系统只用 Supervisor**——它既负责意图分类（闲聊直接回答），也负责多步规划（复合请求拆解）。Router 节点代码保留但未接入主流程，作为未来轻量化分流的备选方案。"
+
+**追问：task_plan 前端怎么展示的？**
+> "通过 SSE 的 `meta` 事件实时推送 `task_plan` 给前端。前端的 ThinkingTrace 面板会渲染成一个 Pipeline 视图——每个步骤显示描述、目标 Agent、执行状态（pending/running/done/failed）。用户能实时看到当前执行到哪一步，哪些步骤已完成。task_plan 还会持久化到 LocalStorage，刷新页面后仍可查看。"
+
+**追问：Supervisor 最多循环几次？超了怎么办？**
+> "硬限制 `MAX_ITERATIONS=5`。超过后强制输出 FINISH，把已完成的步骤结果汇总返回给用户，未完成的步骤标记为 `skipped`。这是防止 LLM 反复调整计划导致死循环的兜底机制。"
+
+### Q31：MCP 工具为什么不实时连接？缓存用 PostgreSQL 而不是 Redis？⭐
+
+**答**：
+
+> "这是一个性能瓶颈驱动的架构决策。最初 Tool Agent 每次运行时都会实时连接外部 MCP Server 拉取工具列表——如果是 stdio 类型（比如 `npx -y @modelcontextprotocol/server-github`），每次都要启动一个 Node.js 子进程、npm 检查更新、解压 node_modules，在 Windows 上耗时 3-40 秒不等。这意味着用户发一句话，光 MCP 工具加载就要卡好几秒，体验不可接受。
+>
+> 解决方案是**创建时预缓存 + 运行时只读 DB**：
+> 1. 用户在前端新建 MCP 配置时，点击'测试连接'会触发一次实时连接，拉取全部子工具的 name、description、inputSchema，写入 `mcp_server_configs` 表的 `cached_tools` JSON 字段
+> 2. 同时 LLM 根据子工具列表生成一句整体功能描述（30-80 字），写入 `description` 字段
+> 3. 运行时 Supervisor 读 `description` 做规划，Tool Agent 读 `cached_tools` 拼装 Function Calling schema，全程只查 PostgreSQL，0ms 级别
+> 4. 用户需要更新时，前端有'强制刷新'按钮重新连接并覆盖缓存"
+
+**追问：为什么不用 Redis？**
+> "因为这个场景不需要 Redis 的特性。MCP 配置是低频写入（创建/刷新时才写）、中频读取（每次对话加载一次），数据量极小（每个用户几条记录）。PostgreSQL 的单行主键查询本身就是亚毫秒级，而且数据需要持久化（重启不能丢）、需要和 `MCPServerConfig` 模型的其他字段（name、connection_uri 等）在同一个事务里管理。引入 Redis 反而增加了一层缓存一致性问题和运维复杂度，对这个场景是过度设计。"
+
+**追问：缓存会不会过期？外部 Server 更新了工具怎么办？**
+> "缓存没有自动过期机制，因为 MCP Server 的工具列表通常是稳定的（版本不变就不会变）。如果外部 Server 升级了，用户在管理页点击'强制刷新'按钮即可——后端会重新连接外部 Server、拉取最新工具列表、覆盖 `cached_tools` 和 `tool_count`，并返回新列表给前端展示。这是**显式刷新**而非**隐式过期**的设计——用户对缓存状态有完全的控制权和可见性。"
+
+### Q32：LLM 生成 MCP 描述的 prompt 是怎么设计的？质量怎么保证？
+
+**答**：
+
+> "prompt 的核心约束是：输入 MCP 服务名 + 全部子工具列表（名称和描述），输出一句 30-80 字的中文整体功能概述。要求精准概括该服务能做什么，不要列举每个工具，而是抽象到能力层面。
+>
+> 比如 GitHub MCP 有 26 个子工具（create_issue、get_pull_request、search_repos 等），LLM 生成的描述可能是：'GitHub 代码仓库管理服务，支持仓库搜索、Issue/PR 管理、代码文件读写、分支操作等 GitHub API 全功能集成'。
+>
+> 质量保证靠三层：
+> 1. **prompt 约束**：明确字数范围、语言、风格要求，用 `temperature=0` 保证确定性
+> 2. **用户可编辑**：LLM 生成后自动填入描述输入框，用户可以手动修改再保存
+> 3. **随时重新生成**：管理页支持点击'AI 重新总结'按钮，基于当前缓存的子工具列表重新调用 LLM 生成
+>
+> 用的是 `get_llm_fast`（轻量模型），不是主力模型，因为这个任务不需要太强的推理能力，快速响应更重要。"
+
+### Q33：Supervisor 怎么知道有哪些 MCP 可用？信息从哪来？
+
+**答**：
+
+> "Supervisor 在规划阶段调用 `_get_mcp_info(user_id)`，这个函数直接查 PostgreSQL——`SELECT name, description FROM mcp_server_configs WHERE created_by=用户ID AND is_active=True`。返回一个 `[{name, description}]` 列表。
+>
+> 然后在 `_build_planning_prompt` 里动态拼接到 prompt 中，格式类似：`外部工具(MCP)：GitHub(GitHub 代码仓库管理服务...)、Filesystem(本地文件系统读写服务...)`。这样 LLM 就能像看到内部 Skill 一样看到外部 MCP 的能力描述，在规划 task_plan 时决定是否需要调用。
+>
+> 关键点：这个函数**不发起任何网络连接或子进程**，只是一次简单的 DB 查询。即使用户配了 10 个 MCP Server，查询耗时也不到 1ms。如果某个 MCP 没有描述（description 为空），它仍然会出现在列表里，只是 LLM 只能看到名称，可能无法准确判断它的用途——所以我们在前端强烈建议用户添加描述。"
+
+**⚠️ 注意**：面试时不要说"Supervisor 会去连接 MCP Server"——它根本不会。所有 MCP 信息都是从数据库读的，连接只发生在用户创建/刷新时。这个区分体现了你对**读写分离**和**性能优化**的理解。
+
+---
+
+## 第九轮：多步任务执行优化 + LLM 分级策略
+
+### Q34：多步任务是怎么实现步骤隔离的？遇到过什么问题？⭐
+
+**答**：
+
+> "这是一个实际踩坑后修复的问题。Supervisor 把'搜索 + 写文件'拆成两步 task_plan 是正确的，Graph 结构也支持 Supervisor → Tool Agent → Supervisor 循环。但实际运行时，Step 1 的 Tool Agent 在一次 FC 循环里把两步全做了——搜完直接写文件，Supervisor 回来发现全做完了就直接 finish。
+>
+> **根因**：Tool Agent 的 messages 里同时包含了原始用户消息（'帮我搜索 X 信息并写入文件'）和 Supervisor 指令（'搜索 X 信息'）。LLM 看到用户原始请求后优先满足完整意图，忽略了 Supervisor 的步骤指令。
+>
+> **修复**：当存在 supervisor_instruction 时，不注入 context_messages（原始用户消息），Tool Agent 只看到 system prompt + 上一步结果 + 当前步骤指令。这样每步 Tool Agent 只做被分配的任务，真正走多轮 Graph 循环。
+>
+> **效果**：执行链路从 `supervisor → tool_agent → supervisor`（1 次）变成 `supervisor → tool_agent → supervisor → tool_agent → supervisor`（2 次循环），每步的工具调用独立记录，前端按步骤分别展示。"
+
+**追问：工具调用怎么按步骤区分？**
+
+> "后端 `ToolCallRecord` 加了 `step` 字段，Tool Agent 执行前从 `task_plan` 里找到当前 `in_progress` 的步骤编号，给每条记录打上标记。同时 `tool_calls` 改为累积式——每次 Tool Agent 执行后追加到已有列表上，不覆盖上一步的记录。前端用 computed 按 step 分组，每个步骤卡片只展示自己的工具调用和数量。"
+
+**追问：上一步的结果怎么传给下一步？**
+
+> "Tool Agent 执行完后 `final_answer` 写入 state，下一步的 Tool Agent 通过 `existing_answer` 读取。以 assistant 消息注入 messages，截取前 6000 字符避免 context 过大。Supervisor 的 dispatch 指令里也会描述上一步做了什么，LLM 能理解当前应该做什么。"
+
+### Q35：为什么全链路都用 Fast 模型？不怕推理能力不够吗？
+
+**答**：
+
+> "系统里有两个模型：Pro（deepseek-v4-pro，推理能力强但慢，单次调用 20-25 秒）和 Fast（flash 模型，快但推理弱一些，单次调用 3-5 秒）。
+>
+> 实际上 **Supervisor、Tool Agent、Router、RAG Agent 全部用的是 Fast 模型**。原因是这些节点的任务本质上都是'看到上下文 + 指令，输出结构化 JSON'——这是结构化输出任务，不需要深度推理。工具/Skill 的名称和描述已经很明确了，Fast 模型完全能准确匹配。
+>
+> **分级策略总结**：
+> - **Pro 模型**：仅用于部分复杂 Skills（如 document_summarizer 长文档摘要、email_drafter 邮件生成）和对话摘要压缩——这些场景需要更强的理解和生成能力
+> - **Fast 模型**：Supervisor 任务规划、Router 意图分类、Tool Agent FC 循环、RAG Agent 回答生成
+>
+> 这样设计的核心考量是**响应速度优先**。多步任务里 Tool Agent 会被调用多次，每次 FC 循环至少 2 次 LLM 调用，用 Fast 模型节省的时间是乘法级别的。如果未来发现 Fast 模型在复杂规划场景准确率下降，可以单独把 Supervisor 升级为 Pro 模型。"
+
+### Q36：research_assistant Skill 为什么去掉了 RAG 搜索？
+
+**答**：
+
+> "最初设计是'web 搜索 + 可选 RAG'——如果会话关联了知识库就同时查 KB。但实际使用发现一个问题：用户说'帮我调研 ReAct 框架'，这明显是互联网调研需求，但因为会话有关联的知识库（可能是完全不相关的内容），Skill 还是会对每个搜索关键词都做一次 RAG 检索。浪费了时间，也可能把无关的内部文档混入报告。
+>
+> **重构思路**是职责单一化：
+> - `research_assistant`：纯互联网搜索 + LLM 综合报告（多关键词并行搜索 + 去重 + 带引用报告）
+> - `document_summarizer`：纯 KB 检索 + 总结（multi-query RAG + LLM 摘要）
+>
+> 如果用户需要'结合互联网和内部知识库'的综合调研，Supervisor 会拆成多步：Step 1 用 `research_assistant` 搜互联网，Step 2 用 `document_summarizer` 查 KB，由 Supervisor 综合两步结果回答。这样每个 Skill 职责清晰，不会互相干扰，也契合了多步任务编排的架构优势。"
+
+**⚠️ 注意**：这个问题可能会被追问"你怎么发现的这个问题？"——答：通过日志分析发现 `rag_search` 的调用出现在纯互联网搜索场景里，查看 Skill 代码发现是 `kb_id is not None` 就必查的逻辑。属于功能设计和实际使用场景不匹配。
+
+### Q37：在全局总结或多领域对比（如对比十个行业挑战、对比四个行业未来态）的宏观查询下，你的 Reranker 精排取 Top-6（`RERANK_TOP_N=6`）会不会导致关键信息丢失？如果发生了这种物理截断，你是怎么在工程上优雅解决的？⭐
+
+**答**：
+
+> "这是我在对系统进行高强度压力测试（Stress Test）时，真实遇到并定位解决的一个**关于 Reranker（精排器）在‘多主体/全局汇总’意图下的物理截断缺陷**。
+> 
+> **1. 现象与排查**：
+> 在要求系统‘对比自动驾驶、农业、工业、电网这四个行业未来的终极形态’时，大模型完美答对了前三个，但对于第四个电网，却在没有原文背景的情况下依靠自身的‘逻辑泛化能力’进行了假装类比推断。
+> 我去翻了系统的运行追踪日志（Trace Log），发现大模型的 Prompt 限制极其严密（没有幻觉乱编），且第一阶段的向量+BM25双路检索成功粗筛召回了包含电网内容的 Top-15。
+> **根因在于**：因为我平时将精排限制为 `RERANK_TOP_N = 6`。在面对多实体对比时，前三个行业的 Chunks 抢占了精排得分的前 6 名，导致第四个行业的 Chunks（即使语义十分相关）由于第 6 名的物理限制，在精排阶段被无情地截断（丢弃）了。
+> 
+> **2. 系统级优化与解决思路**：
+> 我没有盲目地去修改 Prompt，而是从**检索路由与数据链路层**设计了三套优雅的渐进式解决方案：
+> 
+> *   **方案一：动态重排窗口（Dynamic Rerank Window）**：
+>     In Supervisor 任务规划节点中，一旦大模型检测到当前用户的 Query 属于‘多实体对比、全局汇总、全景梳理’等宏观意图，系统在分发任务给 RAG Agent 时，会自动将 `RERANK_TOP_N` 的精排上限从 6 动态放宽到 12。
+> *   **方案二：多路并行检索与 Reduce 合并（Parallel Multi-Query & Reduce）**：
+>     如果对比的主体非常明确，由 Agent 将查询拆分为 4 个独立的子查询（如分别单独检索‘农业未来态’、‘电网未来态’），每个子查询各自捞取 Top-3，最后将 12 个强相关的 Chunks 拼装成上下文。这利用了 **MapReduce** 的思想，彻底消除了单路 Reranker 的打分偏见。
+> *   **方案三：分层级章节索引（Hierarchical Summary Indexing）**：
+>     对于通篇总结任务，优先检索在向量库中提前保存好的‘小章节/大章节 Summary’。利用 Summary 定位到具体实体和章节后，再去检索其底层的 Child Chunks 进行细节补充，避免了在细碎 Chunks 层面由于 Top-K 限制导致的主体丢失。
+> 
+> 这个调优经历有力证明了：**我不仅能实现高阶 RAG 管道，而且深刻理解双塔/交叉编码器在不同业务场景下的局限性，并具备在工程链路层实现自适应调优的架构设计能力。**"
+
+---
+
+## 第十轮：LangGraph 选型 + State 设计
+
+### Q38：为什么选 LangGraph？不用 CrewAI / AutoGen / 普通 LangChain Agent？⭐ 高频
+
+**答**：
+
+> "我对比过四种方案：
+>
+> - **普通 LangChain Agent**：基于 ReAct prompting，工具调用流程黑盒，没有显式的状态管理。多步任务里 LLM 经常忘记前面的执行结果，且不支持复杂的条件分支。
+> - **CrewAI**：基于'多 Agent 角色扮演'抽象（每个 Agent 有 role/goal/backstory）。适合'多角色协作写文章'这种场景，但**对状态机和工程化控制不友好**——你很难精确控制谁先执行、共享什么数据。
+> - **AutoGen**：微软出的，基于'Agent 之间对话'抽象，每个 Agent 是一个独立 LLM 实例。对于工程化的'确定性多步任务'来说过重，调试也困难。
+> - **LangGraph**：基于**状态机**的明确抽象——节点是函数，边是路由，State 是共享内存。我的项目是'明确的多步流水线'（context_prep → supervisor → rag_agent / tool_agent → loop），LangGraph 是最贴合的工具。
+>
+> 选 LangGraph 的核心理由：**显式状态机 + 可观测的执行链路**。我用 `execution_trace` 字段记录每个节点的输入/输出/耗时，前端可视化整条执行链路。CrewAI 和 AutoGen 没有这种工程化的状态可观测性。"
+
+**追问：LangGraph 的 checkpoint 你用了吗？为什么？**
+
+> "**没用 checkpoint**。LangGraph 的 checkpoint 主要用于：①长任务断点续跑 ②人在回路（Human-in-the-Loop）。我的场景是'一次对话 = 一次 graph.invoke'，没有跨次复用的需求；多轮对话靠 session_id 在数据库层管理历史消息，比 checkpoint 更显式可控。如果未来要做'用户中途打断 + 继续'这种交互，再开 checkpoint 也不迟。"
+
+### Q39：你的 AgentState 是怎么设计的？字段之间怎么合并？⭐
+
+**答**：
+
+> "AgentState 是一个 TypedDict，分六大组：
+>
+> 1. **输入**：user_input / session_id / user_id / kb_id
+> 2. **上下文记忆**：summary（L1 摘要）/ messages（自动追加）/ context_messages（中间件统一打包）
+> 3. **Supervisor 决策**：intent / route_reason / next_agent / supervisor_instruction / agent_iterations / **task_plan**（任务计划数组）/ step_contexts（每步上下文）
+> 4. **RAG 结果**：retrieved_docs / faithfulness
+> 5. **Tool 执行**：tool_calls（带 step 字段标记归属步骤）/ skill_used
+> 6. **可观测性**：execution_trace / total_tokens / error
+>
+> 还有一个特殊字段 `_token_queue`，是流式推送用的 `queue.Queue` 对象——只在 SSE 模式下注入。"
+
+**追问：LangGraph 是怎么合并多个节点对 State 的修改的？**
+
+> "LangGraph 用 **reducer 机制**合并。每个节点 return 一个 partial dict，框架自动 merge 到主 State：
+>
+> - **默认行为**：直接覆盖
+> - **特殊 reducer**：用 `Annotated[List, add_messages]` 标记的字段会**追加**而不是覆盖
+>
+> 我的 `messages` 字段就用了 `add_messages`，子 Agent 添加的消息自动累积。但 `execution_trace` 我**故意没用 reducer**——每个节点显式调用 `append_trace(state, ...)` 拼出完整新 list 返回，这样可以精确控制 trace 的格式和顺序，调试时更可控。"
+
+**追问：为什么不用 LangChain 的 BaseMessage 而是普通 dict？**
+
+> "两个原因：**第一**，BaseMessage 在不同节点间 pickle/JSON 序列化有兼容性坑（特别是 tool_calls 字段）；**第二**，纯 dict 直接对接 OpenAI Chat Completions API 格式，前端可视化、数据库持久化、日志打印都更方便。我宁可放弃 LangChain Message 的类型检查也要换来工程灵活性。"
+
+---
+
+## 第十一轮：Celery + 数据库 + 服务架构
+
+### Q40：文档处理为什么用 Celery？不能直接 BackgroundTask 吗？⭐
+
+**答**：
+
+> "FastAPI 的 BackgroundTask 跑在 web 进程里，有三个致命缺陷：①web 进程重启会丢失任务 ②跟用户请求抢占 CPU/内存，并发上来 web 会卡 ③没有重试、超时、状态查询机制。
+>
+> 文档处理是典型的**重 I/O + 长耗时**任务：解析（几秒）→ LLM 清洗（几十秒）→ 分块 → 调通义向量化 API（千条 chunk 需要几十次 API 调用）→ 写 ChromaDB。一份 100MB 的 PDF 完整处理可能要 5-10 分钟。这种任务必须扔给独立 worker 进程异步跑。
+>
+> 我的实现是单个 Celery task `process_document(document_id, task_record_id)` 串行跑五个阶段，每阶段结束更新 `task_records` 表的 progress 字段（0/5/20/30/50/100）。前端轮询任务接口拿到实时进度。"
+
+**追问：Broker 为什么选 Redis 不选 RabbitMQ？**
+
+> "**Redis 当 broker 对中小项目就够了**。RabbitMQ 是为'高可靠性 + 复杂路由（exchange/binding）'设计的，比如需要 fanout 广播、topic 路由这种场景才有价值。我的任务模型很简单：单队列、串行执行、低 QPS（人工上传文档触发，每分钟几十个任务封顶）。
+>
+> Redis 的优势是**部署简单**——项目已经在用 Redis 做缓存和会话，broker 直接复用，部署只多两行配置（DB 1 当 broker、DB 2 当 result backend）。RabbitMQ 要额外起一个服务，对个人项目是过度工程。
+>
+> 如果未来扩到企业级，每天百万级文档任务，再换 RabbitMQ 不迟——Celery 的 broker 是配置项，业务代码完全无感。"
+
+**追问：任务怎么保证幂等？失败了怎么重试？**
+
+> "**幂等**：每个 task 拿 `document_id` 后第一件事是检查 document.status——如果已经是 COMPLETED 就直接返回，不重复处理。如果是 FAILED 重试时会清空已有 chunks 再重新跑。
+>
+> **重试**：Celery 配了 `autoretry_for=(ConnectionError,)` + `max_retries=2 + countdown=5`，**只对网络错误自动重试**。业务错误（如文件损坏、API 鉴权失败）不重试——立刻标记 FAILED，避免反复消耗 LLM token。
+>
+> **超时**：`task_soft_time_limit=600` 软超时抛异常，`task_time_limit=900` 硬超时直接 kill worker。防止单文档死循环卡住整个队列。
+>
+> **Worker 配置**：`worker_prefetch_multiplier=1` 让每个 worker 同时只拿 1 个任务，避免单 worker 吃多个任务时其他 worker 饿死。`task_acks_late=True` 让任务执行完再 ack，挂掉的任务会被重新分发。"
+
+**追问：为什么用 `--pool=solo` 这种单线程模式？**
+
+> "**Windows 上 Celery 5.x 默认的 prefork 模式不可用**——prefork 依赖 `fork()` 系统调用，Windows 没有。`solo` 是单线程模式，开发环境完全够用；生产部署 Linux 上会切到 prefork 或 gevent 模式。这是 Celery 的已知历史问题，部署文档里有注明。"
+
+### Q41：为什么选 PostgreSQL 不选 MySQL？SQLAlchemy 怎么用的？
+
+**答**：
+
+> "选 PostgreSQL 的核心理由是**对 JSONB 的原生支持**。我有几个字段是 JSON 结构：MCP 的 `cached_tools`（每个 MCP 几十个工具的 schema）、ChatMessage 的 `tool_calls_json`、TaskRecord 的 `meta_json`。这些字段用 JSONB 存储 + 索引，比拆表关联快得多。MySQL 的 JSON 字段虽然也能用，但索引能力和函数支持都差一截。
+>
+> 另外 PostgreSQL 的 array 类型、partial index、CTE 等高级特性也是加分项。但日常使用差别不大，技术栈替换成本可控。
+>
+> **ORM 用 SQLAlchemy 2.0 + Alembic**：
+> - SQLAlchemy 2.0 的新式 `Mapped[]` 类型标注让 IDE 类型提示完全到位
+> - Alembic 自动生成迁移文件，每次改 model 跑 `alembic revision --autogenerate` 就行
+> - **没用 ORM 的关联加载**：所有跨表查询都显式写 SQL（`db.query(Model).filter(...)`），避免 N+1 隐性陷阱"
+
+**追问：怎么做用户数据隔离？**
+
+> "我所有业务表（KnowledgeBase / Document / ChatSession / MCPServerConfig / MemoryFact）都有 `user_id` 外键。Service 层每个查询都强制带 `user_id` 过滤——比如 `KnowledgeBaseService.list(db, user_id=current_user.id)`。
+>
+> 防越权的关键是**不在 URL/Body 接收 user_id**：所有需要鉴权的接口从 JWT token 里解出 `current_user`，user_id 永远从服务端 session 取，避免前端篡改。比如查询知识库的接口是 `GET /api/kb/{kb_id}`，后端会校验 `kb.user_id == current_user.id`，不匹配直接 403。
+>
+> 不算严格意义的多租户（没用 schema 隔离），但对 SaaS 早期阶段够用。"
+
+**追问：Alembic 迁移踩过什么坑？**
+
+> "踩过两个坑：
+>
+> 1. **`enum` 类型修改要手写**：PostgreSQL 的 enum 不能直接 ALTER，必须 `ALTER TYPE ... ADD VALUE 'new'`。Alembic autogenerate 检测不出来 enum 变化，要手动加迁移逻辑。
+>
+> 2. **多 schema 同时改要分批**：一次 `autogenerate` 改了 5 张表的字段，结果某张表的外键约束依赖另一张表的新字段，迁移顺序错了会失败。改为每次改 1-2 张表，跑通再 commit。"
+
+### Q42：做这个项目最难的部分是什么？踩了哪些坑成长最大？⭐ HR/Lead 必问
+
+**答**（按"问题 - 解决 - 收获"三段式）：
+
+> "最难的不是 RAG 本身，而是**把多个独立组件粘合成可观测、可调试的统一系统**。三个最痛的坑：
+>
+> **1. 同步 LangGraph + 异步 FastAPI 的桥接**（细节见 Q8/Q17）
+> - 问题：LangGraph 的 invoke 是同步的，FastAPI StreamingResponse 需要 async generator
+> - 我尝试过把所有节点改 async，但 LLM SDK 和数据库操作都是同步的，强行 async 化收益不大
+> - 最终用 `asyncio.to_thread + queue.Queue` 做同步→异步桥接
+> - **收获**：理解了 Python 协程/线程/进程的三层抽象，不再迷信 async 万能
+>
+> **2. Windows 上 stdio MCP 的死锁**（细节见 Q18）
+> - 问题：Uvicorn 强制 SelectorEventLoop，但它在 Windows 上不支持子进程管道
+> - 排查了一晚上才定位到是事件循环类型问题
+> - 解决：Proactor 守护线程 + asyncio.wrap_future 桥接
+> - **收获**：对操作系统底层（事件循环 / 子进程 / Windows 特殊性）有了真实理解
+>
+> **3. 多步任务里 Tool Agent 越权问题**（细节见 Q34）
+> - 问题：Supervisor 拆成两步，Tool Agent 一次性把两步全做了
+> - 根因是把原始用户消息和 Supervisor 指令一起喂给了 LLM
+> - 修复：有 supervisor_instruction 时不注入 context_messages
+> - **收获**：LLM 的'听话度'强依赖 prompt 中的信息层级，必须像写测试用例一样精确控制输入
+>
+> 整体最大的成长是：**把'用 LLM 写 demo'升级到'用 LLM 做工程'**。前者关注 prompt 调优，后者关注 fallback、超时、可观测、安全。这是质的飞跃。"
+
+**追问：如果重做你会改什么？**
+
+> "三件事：
+>
+> 1. **从一开始就上 LangSmith 或自建 trace 系统**——我的 execution_trace 是中后期才补的，前期排错全靠 print。
+> 2. **建立评测集和 RAG 回归测试机制**——目前 RAG 改 prompt 全靠人肉测，没法量化对比。如果有评测集驱动，迭代会更快更稳。
+> 3. **MCP 协议选择上**——一开始投入太多精力做 stdio，回头看 SSE / HTTP 形式部署和调试都更轻量。"
+
+**追问：项目花了多久？怎么规划的？**
+
+> "**两个月，我一个人独立完成**。前期一周做调研和架构图，中间六周编码（按周拆 milestone：RAG → Agent → 记忆 → MCP → 前端打磨），最后一周做评测和文档。
+>
+> 时间最大的失控点是 MCP 集成——预估 3 天，实际跑了 1 周（全是 Windows 坑）。教训是：**任何涉及子进程/操作系统底层的集成至少要预留 2-3 倍的 buffer**。"
+
+---
+
+## 第十二轮：横向选型对比 + 观测性
+
+### Q43：ChromaDB vs Milvus vs Qdrant vs PGVector 怎么选？⭐ 必问
+
+**答**：
+
+> "我做了详细对比，最终选 ChromaDB。决策依据：
+>
+> | 项 | ChromaDB | Milvus | Qdrant | PGVector |
+> |---|---|---|---|---|
+> | 部署复杂度 | 单 Docker 容器 | 多组件（etcd+MinIO+多节点）| 单容器 | 数据库扩展 |
+> | 性能 | 中（千万级前优秀）| 极强（亿级）| 强 | 中 |
+> | Filtering | 简单 metadata where | 复杂表达式 | 类 SQL | 完整 SQL |
+> | 适用规模 | 千~百万 chunk | 千万~亿 | 百万~千万 | 百万以内 |
+> | 易用性 | 极简 Python SDK | 学习曲线陡 | API 优雅 | SQL 即用 |
+>
+> 我的项目场景是'每用户几个知识库，每库千~万级 chunk'，**ChromaDB 完全够用且部署最简**。Milvus 是工业级方案但起步复杂——光 etcd + MinIO + Milvus 主体就要起 5+ 容器，对个人项目过重。
+>
+> 上一个项目（找搭子）我用的是 Milvus，因为是 Spring Boot 全家桶，团队对 Java 容器化已经熟悉。这次个人项目优先速度迭代选 ChromaDB。"
+
+**追问：为什么不直接用 PGVector？数据库已经有了**
+
+> "考虑过。PGVector 的优势是和业务数据在同一个 PG 实例里，可以原生 JOIN。但有两个劣势：①索引重建时锁表（千万级 chunk 时影响业务）②不支持 HNSW 之外的高级索引算法。
+>
+> 我把'业务数据和向量数据解耦'当作主动设计——业务用 PG，向量用 ChromaDB，未来切换向量库（如升到 Milvus）只需改一个抽象层（我的 `BaseVectorStore` 接口），业务代码完全无感。"
+
+### Q44：LLM 为什么选 DeepSeek？不选 OpenAI / Claude？
+
+**答**：
+
+> "**主要原因是成本和速度**：
+>
+> - DeepSeek v4 Flash：输入 $0.07/M tokens，输出 $0.27/M。中文场景下质量已经追平 GPT-4 Mini。延迟在国内 200-500ms。
+> - DeepSeek v4 Pro：用于复杂 Skills 和摘要生成，质量接近 GPT-4
+> - GPT-4 Turbo：输入 $10/M，输出 $30/M，是 DeepSeek 的 40-100 倍
+> - Claude 3.5 Sonnet：质量最优，但国内访问需要代理，延迟和稳定性不可控
+>
+> 对一个'每对话可能调用 5-10 次 LLM'的 Agent 系统，成本差距是数量级的。**用 DeepSeek 我能在个人项目里跑出真正可用的 Agent，用 GPT-4 我连开发期都跑不起。**
+>
+> 设计上做了'模型分级'：Router/Supervisor/RAG 这种结构化输出任务用 Flash，document_summarizer 这种创造性任务用 Pro。详见 Q35。"
+
+**追问：DeepSeek API 兼容 OpenAI 协议吗？**
+
+> "**完全兼容**。DeepSeek 的 SDK 就是 `openai` Python 包，只改 `base_url` 和 `api_key` 两个参数。包括 Function Calling、streaming、JSON mode 都兼容。这意味着如果未来要切回 OpenAI 或换其他模型，业务代码不用动一行。"
+
+### Q45：execution_trace 是怎么设计的？前端怎么消费？
+
+**答**：
+
+> "`execution_trace` 是一个 `List[TraceStep]`，每个 TraceStep 包含：
+>
+> ```python
+> {
+>   'node': str,           # 节点名（如 'supervisor', 'rag_agent'）
+>   'started_at': float,   # 起始时间戳
+>   'elapsed_ms': int,     # 耗时（毫秒）
+>   'input': dict,         # 关键输入摘要（截断的）
+>   'output': dict,        # 关键输出摘要
+>   'error': Optional[str]
+> }
+> ```
+>
+> 每个节点执行结束时调 `append_trace(state, 'node_name', started_at, input_summary={...}, output_summary={...})`，返回一个新的完整 trace list（**不能直接 append 因为没用 reducer**）。
+>
+> 前端通过 SSE 的 `meta` 事件接收 task_plan 和实时执行信息，每个节点结束后追加显示。**ThinkingTrace 组件**渲染成一个 Pipeline 视图：每个节点显示名称、耗时、输入输出摘要、是否出错。前端还会把 trace 持久化到 LocalStorage，刷新页面后仍可查看。
+>
+> 这是我自建的'迷你版 LangSmith'——不需要外部服务，调试效率比 print 高一个数量级。"
+
+**追问：日志怎么打？怎么排查 LLM 出错？**
+
+> "用 loguru。每个节点开头打 `[NodeName] 开始 input={...}`，结束打 `[NodeName] 完成 output={...} tokens={...}`。LLM 调用包了一层 logger 装饰器，每次调用打 `[LLM] in={n_input_tokens} out={n_output_tokens} total={...}`。
+>
+> 出错排查三步走：①看 execution_trace 定位是哪个节点挂了 ②看 loguru 日志找到具体的 LLM 输出 ③把 LLM 输入 prompt 复制到对话窗口手动重跑，复现问题。99% 的 bug 都是 prompt 设计不严谨或 LLM 输出格式漂移。"
+
+### Q46：测试策略是什么？写了多少测试？⭐ 容易被坑
+
+**答**（**老实承认，别编**）：
+
+> "**老实说，自动化测试覆盖率很低**。我写的主要是：
+>
+> 1. **关键工具的单元测试**：calculator 工具（防 eval 注入）、splitter 分块（防边界 bug）、embedder mock 模式（让测试不依赖外部 API）
+> 2. **API 集成测试**：用 FastAPI 的 TestClient 写了 chat / kb / document 几个核心接口的冒烟测试
+> 3. **RAG 端到端**：手工测试集，没自动化
+>
+> **没写**：LangGraph 节点的单元测试、SSE 流式的集成测试、L2 记忆抽取的回归测试。这是已知短板。
+>
+> 如果重做我会优先建两套东西：
+> - **RAG 评测集**（人工标注 100 条 Q-A + ground truth chunk）+ 自动化跑 Recall@K
+> - **Agent 行为回归**（用固定 seed 跑 task_plan 生成，对比是否一致）
+>
+> 这块面试如果被深挖，可以诚实说'测试体系是后期没做完的部分，我有清晰认知和补救计划'——比假装写过更可信。"
+
+**⚠️ 教训**：测试问题千万别编"覆盖率 80%"，面试官追问"哪些模块没覆盖"或"展示一下 pytest 文件"会瞬间穿帮。
+
+### Q47：怎么部署？数据量增长 100 倍系统能撑吗？
+
+**答**：
+
+> "**当前部署**：Docker Compose 一键起，5 个服务：
+> - `backend`：FastAPI（gunicorn + 4 workers）
+> - `worker`：Celery worker（solo pool 开发，prefork 生产）
+> - `postgres`：PG 15
+> - `redis`：缓存 + Celery broker
+> - `chromadb`：HTTP server 模式
+> - `frontend`：nginx 静态托管
+>
+> 每个服务都有 healthcheck，依赖通过 `depends_on: condition: service_healthy` 控制启动顺序。Volume 持久化关键数据（PG / ChromaDB / 上传文件）。
+>
+> **扩展性分析**：
+>
+> | 维度 | 当前 | 100 倍后 | 解法 |
+> |---|---|---|---|
+> | 用户量 | 100 | 10k | backend 横向扩展，nginx 负载均衡 |
+> | 文档数 | 1k | 100k | Celery worker 增加，PG 加从库 |
+> | Chunks | 100k | 10M | ChromaDB 单节点撑得住，但要换 Milvus 集群更稳 |
+> | 并发对话 | 10 | 1000 | LLM API 限速是真瓶颈，可能要走多账号轮询 + 自建模型 |
+>
+> 真正的瓶颈不在我这边，而是 **LLM API 配额**。100 倍并发意味着 LLM 调用量也 100 倍，会被 DeepSeek 限速。最终解法是混合部署：高频简单任务用本地小模型（如 Qwen-7B），复杂任务才走云端 API。"
+
+**追问：用过 Kubernetes 吗？**
+
+> "**没用过 K8s 生产部署**。这个项目用 Docker Compose 已经够用了。K8s 适合多节点集群、滚动升级、自动扩缩容这些场景，对个人项目是过度工程。但我了解 K8s 的核心概念（Pod / Service / Ingress / HPA），如果未来加入团队需要也能快速上手。"
+
+**⚠️ 教训**：没用过的东西就老实说没用过 + 加'但了解核心概念'+ '能快速上手'，比假装用过被追问细节穿帮强。
+
+---
+
+## 通用闲聊问题（HR / 技术 Lead 常问）
+
+### Q48：为什么从全栈实习转 AI 方向？
+
+> "实习期间做的 AI 问答助手让我体会到 LLM 能做的远不止'问答'——它是新一代的程序范式。所以业余时间自己学了 RAG、Agent、向量库，做了 NexusAI 这个项目作为系统性练习。我的优势是：**全栈底子让我能独立闭环（前端到部署），AI 视野让我能把 LLM 真正落到工程**——大部分 AI 工程师不懂工程化部署，大部分全栈不懂 AI 底层，我两边都有积累。"
+
+### Q49：平时怎么学新东西？关注哪些资讯？
+
+> "三个渠道：
+> 1. **论文**：关注 ArXiv 上 RAG / Agent / LLM 系统相关的工作，比如 Anthropic 的 Contextual Retrieval、CMU 的 HyDE、IBM 的 ReAct
+> 2. **工程博客**：Anthropic / LangChain / OpenAI 官方博客，HuggingFace 周报
+> 3. **开源代码**：直接读 LangGraph / MCP SDK / Unstructured 这些库的源码——比看文档更能学到设计思路
+>
+> 最近在看的：Anthropic 的 Computer Use Agent 实现思路、Mem0 的长期记忆架构、OpenAI Realtime API 的语音对话设计。"
+
+### Q50：你觉得自己的短板是什么？
+
+> "三个：
+> 1. **大规模分布式经验缺**——做过单机 / Docker Compose，没做过 K8s 集群和真正的高并发系统
+> 2. **算法和数据结构底子比专业刷题选手弱**——能写常见算法但 LeetCode Hard 题比较吃力
+> 3. **测试和 CI/CD 体系搭得不完善**——见 Q46
+>
+> 这些都是入职后可以快速补的'技能短板'，不是'认知短板'。"
+
+**⚠️ 这道题千万别说'我没短板'或'我太追求完美'**。诚实承认 3 个具体短板 + 表达成长意愿，是最好的答法。
