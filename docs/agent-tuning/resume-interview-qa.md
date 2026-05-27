@@ -977,3 +977,34 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
 > 这些都是入职后可以快速补的'技能短板'，不是'认知短板'。"
 
 **⚠️ 这道题千万别说'我没短板'或'我太追求完美'**。诚实承认 3 个具体短板 + 表达成长意愿，是最好的答法。
+
+---
+
+## 第十三轮：最近的实战故事（Bonus 题，强烈推荐主动讲）
+
+### Q51：最近一次解决得最爽的技术问题是什么？⭐ 重点准备
+
+> "上周给 Agent 加了 **Human-in-the-Loop 工具审批** ——MCP 工具是用户动态接入的，写文件、shell 执行这种副作用 LLM 误调一次就翻车，所以必须让用户在执行前确认。我用 LangGraph 0.3.x 的 `interrupt()` + Checkpointer 实现的，全栈做下来踩了三个有意思的坑。
+>
+> **第一个坑是序列化**。LangGraph 编译时要传 `checkpointer=PostgresSaver(...)`，每次状态切换都会把 `AgentState` 整个 pickle 进 Postgres。我原本在 state 里塞了一个 `queue.Queue` 当流式 token 通道，结果 checkpoint 直接报序列化失败。解决方案是把 queue 抽出来做成一个**全局注册表**（`stream_queue.py`），key 是 session_id，state 里只存 ID，不存对象——本质上就是把"运行时引用"和"可持久化状态"做隔离。
+>
+> **第二个坑最有教育意义**——我按文档以为 `graph.invoke()` 遇到 `interrupt()` 会在返回值里塞一个 `__interrupt__` 字段。代码写完跑了一下，前端审批卡片永远不弹。日志看后端，节点的 `interrupt()` 明明触发了 `GraphInterrupt`，但 `final_state.get("__interrupt__")` 永远是 None。后来读 LangGraph 源码才发现：**`invoke()` 的返回值是图的 output state，不带元信息**，中断信息要单独从 `graph.get_state(config).next` 和 `state_snapshot.tasks[*].interrupts[0].value` 取——前者非空说明图没真正结束，后者才是 payload。换成 `get_state()` 检测之后立刻就通了。这个坑让我意识到：**面对新 API 的时候不要被文档示例带偏，要去源码里看返回值的真实结构**。
+>
+> **第三个坑是危险工具的判定边界**。我一开始把"内部工具白名单"做成精确匹配（`weather`、`calculator`），结果实际工具名是 `get_weather`，没命中白名单就被当成危险工具拦下来了，连查个天气都要审批，体验很糟糕。改成**子串匹配 + 高危关键词反向判定**：白名单关键字（`weather/search/get_/list_`）命中就放行，否则再看是否包含 `write/delete/execute` 这类高危词——这样既能兜住命名变体，又不会漏掉真危险的操作。
+>
+> 整个功能下来：后端改了 11 个文件（新增 3 个模块）、前端改了 3 个文件、升级了 langgraph 到 0.3.34，端到端打通从 `interrupt → SSE → 审批卡片 → POST /resume → Command(resume=) → 工具执行 → 写文件成功`。最爽的就是第二个坑被定位的那一刻——盯着日志看了半小时，最后是去翻 `langgraph/pregel/__init__.py` 才确认的。"
+
+**这道题为什么必讲**：
+- 展示 **LangGraph 高阶特性掌握**（interrupt/Checkpointer/Command resume，比单纯 ReAct 高一个量级）
+- 展示 **从抽象问题到工程实现** 的全链路：架构（Queue 分离）→ 调试（源码定位）→ 体验（白名单边界）
+- 展示 **全栈交付能力**：SSE 协议、Pinia 状态、Vue 响应式，一个人闭环
+- 展示 **安全意识**：工具分级、Human-in-the-Loop，是 Agent 落地企业场景的核心需求
+- **故事感强**：三个坑层层递进，比单点炫技更让面试官有记忆点
+
+**追问预案**：
+- *Q：为什么不存 `interrupt` 状态在自己的数据库里，要用 Checkpointer？*
+  → "Checkpointer 不只是存中断点，它存的是图的**完整执行栈**——节点已经跑到哪一步、消息列表、工具调用记录全在内。`Command(resume=decision)` 之所以能精准回到 `interrupt()` 那一行继续跑，靠的就是 Checkpointer 重放整个图。自己实现就得手动序列化所有节点状态，不划算。"
+- *Q：审批通过后，节点是从中断点继续，还是从头重跑？*
+  → "**从头重跑**。这是 LangGraph 的设计：节点是幂等单元，恢复时整个节点重新执行，但 `interrupt(payload)` 在重跑过程中遇到时会**直接返回缓存的 decision**，不再抛 GraphInterrupt。所以我在 interrupt 之前的代码（LLM 调用、安全工具执行）会重复跑——这要求节点设计要避免不可重复的副作用。"
+- *Q：thread_id 怎么设计的？为什么不用 session_id？*
+  → "用的是 `turn-{user_msg_id}`，**每条用户消息一个 thread**。这样一来，多轮对话历史还是由我自己的 DB 管理（`chat_messages` 表），Checkpointer 只负责**单轮内部**的中断恢复。如果用 session_id，会出现跨轮 checkpoint 互相污染、清理时机难定的问题。"

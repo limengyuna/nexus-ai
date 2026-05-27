@@ -443,8 +443,12 @@ class ChatService:
         )
         # 流式队列注册到全局表（state 不再持有 Queue，避免 Checkpointer 序列化失败）
         from app.agent.stream_queue import register_queue, unregister_queue
+        from app.agent.cancel_registry import clear_cancel
         from app.agent.checkpoint import make_thread_config
         register_queue(session.id, token_queue)
+        # 清除上一轮可能残留的 cancel 标记（协调层是内存字典，
+        # 如果上一轮被取消但未清理，本轮一启动就会被误判为已取消）
+        clear_cancel(session.id)
         thread_config = make_thread_config(user_msg.id)
 
         graph = get_agent_graph()
@@ -460,6 +464,8 @@ class ChatService:
         finally:
             # 流式结束（无论正常/异常）必须注销队列，避免内存泄漏
             unregister_queue(session.id)
+            # 顺便清掉 cancel 标记，避免遗留影响后续会话
+            clear_cancel(session.id)
 
         # ---------- 5. 等待图执行完成，获取完整 state ----------
         try:
@@ -622,8 +628,10 @@ class ChatService:
         yield ("status", {"step": "resuming", "user_msg_id": user_msg_id})
 
         # 准备流式队列与 thread 配置
+        from app.agent.cancel_registry import clear_cancel
         token_queue: queue_mod.Queue = queue_mod.Queue()
         register_queue(session.id, token_queue)
+        clear_cancel(session.id)  # 清除上一轮残留 cancel 标记
         thread_config = make_thread_config(user_msg_id)
 
         graph = get_agent_graph()
@@ -648,6 +656,7 @@ class ChatService:
                 yield ev
         finally:
             unregister_queue(session.id)
+            clear_cancel(session.id)
             logger.info("[ChatService.resume] consume queue end, total events yielded: {}", event_count)
 
         # 等待图执行完成

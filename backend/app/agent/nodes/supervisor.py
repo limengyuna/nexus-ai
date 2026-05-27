@@ -178,12 +178,48 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     kb_id = state.get("kb_id")
     user_id = state.get("user_id")
+    session_id = state.get("session_id")
     from app.agent.stream_queue import get_queue
-    token_queue = get_queue(state.get("session_id"))
+    from app.agent.cancel_registry import is_cancelled
+    token_queue = get_queue(session_id)
     iterations = state.get("agent_iterations", 0)
     final_answer = state.get("final_answer", "")
     task_plan = state.get("task_plan", [])
     context_messages = state.get("context_messages", [])
+
+    # ---------- 协作式取消：用户主动中断（真断点续传方案）----------
+    # Supervisor 是图里所有路径的必经之路，在这里检查能保证：
+    # 无论中断时图正在哪个子 Agent，最迟回到 supervisor 时就能停下。
+    #
+    # 关键设计：用 interrupt() 而不是 return next=FINISH
+    # - interrupt() 让 graph 暂停在本节点边界，Checkpointer 自动保存"待恢复"state
+    # - 用户点"继续"按钮 → /resume 端点用 Command(resume={...}) 让节点重跑
+    # - 重跑时 cancel flag 已被清（chat_resume_stream 入口清理），不会再次 interrupt
+    # - LangGraph 机制：interrupt() 在 resume 时直接返回 decision，节点正常往下跑
+    # - supervisor 继续跑会读取 task_plan 中已完成的步骤，直接派发下一步，
+    #   不会重做 tool_agent 已完成的工作（如 research_assistant 调研）
+    if is_cancelled(session_id):
+        logger.info(
+            "[Supervisor] 检测到用户取消信号，触发 interrupt 等待续跑 (session_id={}, task_plan_steps={})",
+            session_id, len(task_plan)
+        )
+        # 推一个 cancelled 事件给前端，让前端立刻显示"继续"按钮
+        # 注：user_msg_id 由 chat_service 在外层 interrupt 检测时注入到事件 payload 中
+        cancelled_payload = {
+            "type": "cancelled",
+            "task_plan": task_plan,
+            "intent": "cancelled",
+            "route_reason": "用户主动中断",
+            "message": "已暂停。点击\"继续\"可从中断点恢复执行（不会重做已完成的步骤）",
+        }
+        if token_queue:
+            token_queue.put(("approval_pending", cancelled_payload))  # 复用同一个事件通道，前端按 type 区分
+        # 调用 interrupt：首次调用抛 GraphInterrupt 让 graph 暂停；
+        # resume 时此处直接返回 decision，节点正常往下跑（supervisor 继续根据 task_plan 派发）
+        from langgraph.types import interrupt
+        decision = interrupt(cancelled_payload)
+        # resume 后 decision 形如 {"action": "continue"}；继续往下走正常 supervisor 逻辑
+        logger.info("[Supervisor] cancel-interrupt 已恢复，decision={} 继续 supervisor 派发", decision)
 
     has_kb = kb_id is not None
     mcp_info = _get_mcp_info(user_id)

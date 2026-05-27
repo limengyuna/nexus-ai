@@ -501,13 +501,18 @@ function onKeyDown(e: KeyboardEvent) {
               @regenerate="regenerateLastAnswer"
             />
             <div v-if="chat.sending && !chat.messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
-              <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+              <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-gray-500 dark:text-gray-400 inline-flex items-center gap-3">
                 <span class="inline-flex gap-1">
                   <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0s"></span>
                   <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
                   <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
                 </span>
-                Agent 正在思考...
+                <span>Agent 正在思考...</span>
+                <button
+                  class="text-xs px-2 py-0.5 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+                  title="停止生成"
+                  @click="chat.stopGenerating()"
+                >停止</button>
               </div>
             </div>
           </template>
@@ -548,7 +553,7 @@ function onKeyDown(e: KeyboardEvent) {
             <span class="text-amber-600 dark:text-amber-400 text-lg">⚠️</span>
             <span class="text-sm font-semibold text-amber-800 dark:text-amber-200">Agent 请求执行工具</span>
             <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-700 text-amber-700 dark:text-amber-200 font-medium">
-              {{ chat.pendingApproval.payload.tool_kind }}
+              {{ (chat.pendingApproval.payload as any).tool_kind }}
             </span>
           </div>
           <!-- 内容 -->
@@ -557,12 +562,12 @@ function onKeyDown(e: KeyboardEvent) {
               <span class="font-medium">{{ chat.pendingApproval.payload.message }}</span>
             </div>
             <div class="text-xs text-gray-500 dark:text-gray-400">
-              工具名：<code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs">{{ chat.pendingApproval.payload.tool_name }}</code>
+              工具名：<code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs">{{ (chat.pendingApproval.payload as any).tool_name }}</code>
             </div>
             <!-- 参数预览（折叠式） -->
             <details class="text-xs">
               <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">查看参数详情</summary>
-              <pre class="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs overflow-x-auto max-h-32 text-gray-700 dark:text-gray-300">{{ JSON.stringify(chat.pendingApproval.payload.arguments, null, 2) }}</pre>
+              <pre class="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs overflow-x-auto max-h-32 text-gray-700 dark:text-gray-300">{{ JSON.stringify((chat.pendingApproval.payload as any).arguments, null, 2) }}</pre>
             </details>
           </div>
           <!-- 操作按钮 -->
@@ -580,6 +585,46 @@ function onKeyDown(e: KeyboardEvent) {
               @click="handleApproval('reject')"
             >
               ✗ 拒绝
+            </button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- 被用户主动中断的"继续"卡片（cancelled-interrupt 时显示） -->
+      <transition
+        enter-active-class="transition-all duration-300 ease-out"
+        enter-from-class="opacity-0 translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition-all duration-200 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-4"
+      >
+        <div
+          v-if="chat.interruptedUserMsgId && !chat.sending && !chat.pendingApproval"
+          class="mx-6 mb-3 rounded-xl border border-blue-300 dark:border-blue-600 bg-blue-50 dark:bg-blue-900/20 shadow-md overflow-hidden"
+        >
+          <div class="flex items-center gap-2 px-4 py-3 bg-blue-100/70 dark:bg-blue-800/30 border-b border-blue-200 dark:border-blue-700">
+            <span class="text-blue-600 dark:text-blue-400 text-lg">⏸</span>
+            <span class="text-sm font-semibold text-blue-800 dark:text-blue-200">任务已暂停</span>
+            <span class="ml-auto text-xs text-blue-600 dark:text-blue-300">已完成的步骤会被保留，不会重做</span>
+          </div>
+          <div class="px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+            点击下方"继续"从中断点恢复执行；如果想换个问题，直接在输入框发送即可（老进度将被放弃）。
+          </div>
+          <div class="flex items-center gap-3 px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10">
+            <button
+              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
+              :disabled="chat.sending"
+              @click="chat.continueInterrupted()"
+            >
+              <span>▶</span>
+              <span>继续</span>
+            </button>
+            <button
+              class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 transition-colors"
+              @click="chat.interruptedUserMsgId = null"
+            >
+              放弃
             </button>
           </div>
         </div>
@@ -622,12 +667,23 @@ function onKeyDown(e: KeyboardEvent) {
             :disabled="chat.sending"
             @keydown="onKeyDown"
           ></textarea>
+          <!-- 双态按钮：sending 时为"停止"，否则为"发送" -->
           <button
+            v-if="!chat.sending"
             class="px-5 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed self-end"
-            :disabled="!inputText.trim() || chat.sending"
+            :disabled="!inputText.trim()"
             @click="handleSend"
           >
             发送
+          </button>
+          <button
+            v-else
+            class="px-5 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors self-end inline-flex items-center gap-1.5"
+            title="停止生成（Agent 会在最近的节点边界主动退出，已完成的进度会保留）"
+            @click="chat.stopGenerating()"
+          >
+            <span class="w-2.5 h-2.5 bg-white rounded-sm"></span>
+            停止
           </button>
         </div>
       </div>

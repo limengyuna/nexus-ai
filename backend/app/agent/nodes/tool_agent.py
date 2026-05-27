@@ -223,7 +223,14 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     MAX_TURNS = 6
     mcp_fail_count = 0  # 连续 MCP 失败计数
     loop_start = time.time()
+    from app.agent.cancel_registry import is_cancelled as _is_cancelled
     for turn in range(MAX_TURNS):
+        # ---------- 协作式取消：每轮 LLM 调用前都轮询 ----------
+        # 这是节点内最重要的检查点：避免在用户已取消的情况下还浪费 LLM token。
+        if _is_cancelled(state.get("session_id")):
+            logger.info("[Tool Agent] 多轮循环入口检测到取消信号，turn={} 提前结束", turn)
+            break
+
         # 总超时保护
         if time.time() - loop_start > FC_LOOP_TIMEOUT:
             logger.warning("[Tool Agent] function calling 循环总超时 ({}s)", FC_LOOP_TIMEOUT)
@@ -263,6 +270,17 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
         # 依次执行每个工具调用
         for tc in tool_calls:
+            # ---------- 协作式取消：用户主动中断 ----------
+            # 长工具序列（一次 LLM 输出多个 tool_call）里也要轮询 cancel 标记，
+            # 否则用户点 Stop 后还得等所有工具跑完才会回到 supervisor 才能停下，体验差。
+            from app.agent.cancel_registry import is_cancelled
+            if is_cancelled(state.get("session_id")):
+                logger.info("[Tool Agent] 工具循环中检测到取消信号，提前跳出 (剩余 {} 个工具未执行)",
+                            len(tool_calls) - tool_calls.index(tc))
+                # 跳出本轮 tool_calls 循环；外层 _function_calling_loop 会继续走
+                # 但下一轮 LLM 调用前的 round 边界会让节点尽快 return 到 supervisor
+                break
+
             tool_name = tc["name"]
             try:
                 args = json.loads(tc["arguments"]) if tc["arguments"] else {}

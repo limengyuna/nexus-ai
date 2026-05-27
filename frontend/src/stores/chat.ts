@@ -109,8 +109,18 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const sending = ref(false)
 
+  // 当前正在进行的 SSE 流的 AbortController，用于主动中断
+  // sendMessageStream / resumeApproval 启动时新建，结束时置 null
+  // stopGenerating action 通过它来 abort fetch + 调后端 cancel 接口
+  const currentAbortController = ref<AbortController | null>(null)
+
   // 工具审批状态（当 Agent 调用危险工具触发 interrupt 时填充）
   const pendingApproval = ref<InterruptEvent | null>(null)
+
+  // 被用户主动中断的 user_msg_id（用于显示"继续"按钮 + 调 resume 续跑）
+  // 仅活在前端内存：刷新页面 / 切换会话即消失（与 Cursor、Windsurf 体验一致）
+  // 用户发新消息时由 sendMessageStream 入口清空
+  const interruptedUserMsgId = ref<number | null>(null)
 
   // 最近一次回复的"思考过程"快照
   const lastIntent = ref('')
@@ -202,6 +212,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId.value = sessionId
     messages.value = []
     clearTrace()
+    interruptedUserMsgId.value = null  // 切会话清掉"被中断"标记（与 Cursor 体验一致）
     if (sessionId !== null) {
       messages.value = await chatApi.listMessages(sessionId)
       loadThinkingTrace(sessionId)
@@ -325,6 +336,9 @@ export const useChatStore = defineStore('chat', () => {
     if (!activeSessionId.value || sending.value) return
     sending.value = true
     clearTrace()
+    // 用户发新消息时放弃老的"被中断 thread"——与 Cursor / Windsurf 行为一致
+    // 老的 checkpoint 在 PostgresSaver 里依然存在，但前端不再显示"继续"按钮
+    interruptedUserMsgId.value = null
 
     // 乐观追加 user 消息
     const optimisticUserMsg: ChatMessage = {
@@ -354,6 +368,10 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(assistantMsg)
     // 拿到 reactive 的引用（直接改 .content Vue 能追踪到）
     const assistantRef = messages.value[messages.value.length - 1]
+
+    // 创建 AbortController，传给 SSE fetch；同时挂到 store 让 stopGenerating 能拿到
+    const controller = new AbortController()
+    currentAbortController.value = controller
 
     try {
       await chatApi.sendMessageStream(activeSessionId.value, content, {
@@ -423,24 +441,84 @@ export const useChatStore = defineStore('chat', () => {
           await fetchSessions()
         },
         onInterrupt: (data) => {
-          // Agent 被中断，等待用户审批（危险工具调用）
-          pendingApproval.value = data
-          // 在 assistant 消息尾部加一个提示，让用户知道需要审批
-          assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
+          // [TEMP DEBUG] 排查"黄色卡片错乱"问题：看真实 payload 类型
+          console.log('[DEBUG onInterrupt] payload.type =', data?.payload?.type, ' | full payload:', data?.payload)
+          // 按 payload.type 区分两种中断：tool_approval（工具审批）vs cancelled（用户主动中断）
+          if (data.payload?.type === 'cancelled') {
+            // ---------- 用户主动中断的 cancelled-interrupt ----------
+            // 后端 supervisor 已让 graph 暂停在 checkpoint，可通过 /resume action=continue 续跑
+            interruptedUserMsgId.value = data.user_msg_id
+            // 同步 task_plan（已完成的步骤会显示为 done，未完成的为 pending）
+            const cancelPayload = data.payload as any
+            if (cancelPayload?.task_plan) {
+              lastTaskPlan.value = cancelPayload.task_plan
+            }
+            // 在 assistant 消息尾部追加提示
+            if (assistantRef && assistantRef.role === 'assistant') {
+              if (!assistantRef.content) assistantRef.content = '⏸ 已暂停（点击下方"继续"恢复执行）'
+              else if (!assistantRef.content.includes('已暂停')) {
+                assistantRef.content += '\n\n⏸ 已暂停（点击下方"继续"恢复执行）'
+              }
+            }
+          } else {
+            // ---------- 工具审批的 tool_approval-interrupt ----------
+            pendingApproval.value = data
+            assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
+          }
         },
         onError: (data) => {
           // 把错误信息追加到 assistant 占位上
           assistantRef.content += `\n\n[错误] ${data.message}`
           throw new Error(data.message)
         },
-      })
-    } catch (e) {
-      // 失败时移除占位 assistant；user msg 可以留着便于用户重发
-      messages.value = messages.value.filter((m) => m.id !== placeholderAssistantId)
-      throw e
+      }, controller.signal)
+    } catch (e: any) {
+      // AbortError 是用户主动中断，不当作错误
+      const isAbort = e?.name === 'AbortError' || /aborted|abort/i.test(String(e?.message || ''))
+      if (isAbort) {
+        // 在 assistant 占位末尾打一个"已中断"小标记
+        if (assistantRef && assistantRef.role === 'assistant') {
+          if (!assistantRef.content) assistantRef.content = '[已中断]'
+          else if (!assistantRef.content.endsWith('[已中断]')) assistantRef.content += '\n\n[已中断]'
+        }
+      } else {
+        // 真正失败：移除占位 assistant；user msg 可以留着便于用户重发
+        messages.value = messages.value.filter((m) => m.id !== placeholderAssistantId)
+        throw e
+      }
     } finally {
       sending.value = false
+      currentAbortController.value = null
     }
+  }
+
+  /**
+   * 主动停止当前正在进行的 Agent 任务（协作式中断 + 真断点续传）
+   *
+   * 关键设计：**不 abort fetch**，仅调后端 /cancel
+   * - 后端 supervisor 检测到 cancel 标记后调 interrupt() 让 graph 暂停
+   * - 暂停时会通过 SSE 推送 'interrupt' 事件（payload.type='cancelled'）
+   * - 前端必须保持 SSE 流通畅才能收到这个事件，进而显示"继续"按钮
+   * - 如果这里直接 abort 了 fetch，前端就收不到 interrupt 事件，无法续跑
+   *
+   * 兜底：90s 超时强制 abort（避免后端真挂死时 UI 永远转圈）
+   */
+  async function stopGenerating(): Promise<void> {
+    if (!sending.value) return
+    const sid = activeSessionId.value
+    if (sid == null) return
+    // 调后端 /cancel —— 后端只是写一个 flag，立刻返回
+    chatApi.cancelMessage(sid).catch((e) => {
+      console.warn('[chat] cancelMessage failed:', e)
+    })
+    // 兜底：90 秒后若 sending 仍为 true（后端没正常推 interrupt），强制 abort
+    const controllerSnapshot = currentAbortController.value
+    setTimeout(() => {
+      if (sending.value && currentAbortController.value === controllerSnapshot) {
+        console.warn('[chat] cancel 90s 超时未响应，强制 abort fetch')
+        controllerSnapshot?.abort()
+      }
+    }, 90_000)
   }
 
   function clearTrace() {
@@ -549,6 +627,118 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /**
+   * 从用户主动中断的位置续跑（不会重做已完成的步骤）
+   *
+   * 工作机制：
+   * - supervisor 中断时调用了 interrupt({type:"cancelled"})，graph 状态保存在 PostgresSaver
+   * - 此处用 Command(resume={action:"continue"}) 从 checkpoint 续跑
+   * - supervisor 重跑入口时 cancel flag 已清，interrupt() 直接返回 decision，节点正常往下走
+   * - 因为 task_plan 中已完成的 step 状态保留，supervisor 会直接派发下一个 pending 的 step
+   *
+   * 与 resumeApproval 区别：
+   * - resumeApproval 用于工具审批（approve/reject）
+   * - continueInterrupted 用于用户主动中断后的续跑（continue）
+   * 两者后端共享同一个 /resume 端点，仅 decision.action 不同
+   */
+  async function continueInterrupted(): Promise<void> {
+    const userMsgId = interruptedUserMsgId.value
+    if (userMsgId == null || !activeSessionId.value || sending.value) return
+    interruptedUserMsgId.value = null
+    sending.value = true
+
+    // 找到当前占位的 assistant 消息（最后一条），继续往里填充
+    const assistantRef = messages.value[messages.value.length - 1]
+    // 清除"已暂停"提示文案，恢复时重新追加
+    if (assistantRef && assistantRef.role === 'assistant') {
+      assistantRef.content = assistantRef.content.replace(/\n*⏸ 已暂停（点击下方"继续"恢复执行）$/, '')
+    }
+
+    // 创建新的 AbortController（resume 也是一次 SSE 流，可被再次 stop）
+    const controller = new AbortController()
+    currentAbortController.value = controller
+
+    try {
+      await chatApi.resumeMessageStream(activeSessionId.value, {
+        user_msg_id: userMsgId,
+        action: 'continue',
+      }, {
+        onStatus: () => {},
+        onMeta: (data: any) => {
+          lastIntent.value = data.intent
+          lastRouteReason.value = data.route_reason
+          lastSkillUsed.value = data.skill_used
+          if (data.task_plan) lastTaskPlan.value = data.task_plan
+        },
+        onChunk: (text) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.content += text
+          }
+        },
+        onInterrupt: (data) => {
+          // 续跑过程中又被中断（再次点了停止 / 工具审批）
+          if (data.payload?.type === 'cancelled') {
+            interruptedUserMsgId.value = data.user_msg_id
+            const cp = data.payload as any
+            if (cp?.task_plan) lastTaskPlan.value = cp.task_plan
+            if (assistantRef && assistantRef.role === 'assistant'
+                && !assistantRef.content.includes('已暂停')) {
+              assistantRef.content += '\n\n⏸ 已暂停（点击下方"继续"恢复执行）'
+            }
+          } else {
+            pendingApproval.value = data
+            if (assistantRef && assistantRef.role === 'assistant') {
+              assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
+            }
+          }
+        },
+        onDone: async (data) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.id = data.message_id
+            assistantRef.tool_calls_json = data.tool_calls
+            assistantRef.token_usage = data.token_usage || null
+          }
+          lastTrace.value = data.execution_trace
+          lastToolCalls.value = data.tool_calls
+          lastRetrievedDocs.value = data.retrieved_docs
+          lastRetrievedMemories.value = data.retrieved_memories || []
+          lastFaithfulness.value = data.faithfulness || null
+          if (data.task_plan?.length) lastTaskPlan.value = data.task_plan
+          if (activeSessionId.value) {
+            saveThinkingTrace(activeSessionId.value, data.message_id, {
+              intent: lastIntent.value,
+              route_reason: lastRouteReason.value,
+              skill_used: lastSkillUsed.value,
+              execution_trace: data.execution_trace,
+              tool_calls: data.tool_calls,
+              retrieved_docs: data.retrieved_docs,
+              retrieved_memories: data.retrieved_memories,
+              task_plan: lastTaskPlan.value,
+              decisions: lastDecisions.value,
+              faithfulness: lastFaithfulness.value,
+            })
+          }
+          await fetchSessions()
+        },
+        onError: (data) => {
+          if (assistantRef && assistantRef.role === 'assistant') {
+            assistantRef.content += `\n\n[续跑失败] ${data.message}`
+          }
+        },
+      }, controller.signal)
+    } catch (e: any) {
+      const isAbort = e?.name === 'AbortError' || /aborted|abort/i.test(String(e?.message || ''))
+      if (!isAbort) {
+        if (assistantRef && assistantRef.role === 'assistant') {
+          assistantRef.content += `\n\n[续跑出错] ${String(e?.message || e)}`
+        }
+      }
+    } finally {
+      sending.value = false
+      currentAbortController.value = null
+    }
+  }
+
   return {
     sessions,
     sessionsLoading,
@@ -575,7 +765,10 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     sendMessage,
     sendMessageStream,
+    stopGenerating,
     resumeApproval,
+    interruptedUserMsgId,
+    continueInterrupted,
     clearTrace,
     loadThinkingTraceForMessage,
   }

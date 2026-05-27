@@ -117,7 +117,18 @@ export function sendMessage(sessionId: number, message: string): Promise<ChatRes
   return request.post(`/chat/sessions/${sessionId}/messages`, { message })
 }
 
+/**
+ * 主动取消正在执行的 Agent 任务（协作式中断）
+ * - 后端只是写一个内存标记，立刻返回；真正"停下来"靠 graph 节点轮询此标记
+ * - 通常前端会同时执行：① AbortController.abort() 关 SSE 流；② 调用此函数
+ *   两者配合：① 让 UI 立刻不再追加 chunk；② 让后端 graph 真正停止跑
+ */
+export function cancelMessage(sessionId: number): Promise<{ session_id: number; cancelled: boolean }> {
+  return request.post(`/chat/sessions/${sessionId}/cancel`)
+}
+
 // ---------- SSE 流式 ----------
+/** 工具审批请求载荷（type='tool_approval'） */
 export interface ApprovalPayload {
   type: 'tool_approval'
   tool_name: string
@@ -127,15 +138,28 @@ export interface ApprovalPayload {
   message: string
 }
 
+/** 用户主动中断载荷（type='cancelled'，由 supervisor 在 interrupt() 时构造） */
+export interface CancelledPayload {
+  type: 'cancelled'
+  task_plan: any[]
+  intent: string
+  route_reason: string
+  message: string
+}
+
+/** interrupt 事件统一载荷 —— 通过 payload.type 区分子类 */
+export type InterruptPayload = ApprovalPayload | CancelledPayload
+
 export interface InterruptEvent {
   user_msg_id: number       // resume 时必传，定位 thread_id
   session_id: number
-  payload: ApprovalPayload
+  payload: InterruptPayload
 }
 
+/** resume 决策：approve/reject 用于工具审批；continue 用于用户主动中断的续跑 */
 export interface ResumeDecision {
   user_msg_id: number
-  action: 'approve' | 'reject'
+  action: 'approve' | 'reject' | 'continue'
   reason?: string
   edited_args?: Record<string, any> | null
 }

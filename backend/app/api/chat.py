@@ -304,3 +304,37 @@ async def resume_message(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post(
+    "/sessions/{session_id}/cancel",
+    summary="主动取消正在执行的 Agent 任务（协作式中断）",
+)
+async def cancel_message(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    用户主动中断 Agent 执行。
+
+    实现机制（协作式取消）：
+    - 本端点仅写一个 cancel 标记到协调层（内存字典），立刻返回 200
+    - 真正"停下来"的动作在 graph 内部：supervisor / tool_agent 节点会在
+      入口或循环边界轮询此标记，发现 True 就主动 return 走 FINISH 分支
+    - 由于 LangGraph 在每个节点边界都会自动落 checkpoint，被取消时的进度
+      会自动保留，后续可通过 /resume 续跑
+
+    与 SSE 断流的关系：
+    - 前端通常会同时做两件事：① fetch.abort() 关 SSE 流；② POST /cancel
+    - 仅做 ① 不会让后端 graph 停下（线程会跑完）；本端点解决的就是 ② 的事
+    """
+    session = ChatService.get_session(db, session_id)
+    if session is None or session.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    from app.agent.cancel_registry import request_cancel
+    from loguru import logger
+    request_cancel(session.id)
+    logger.info("[API] 收到取消请求 session_id={}, user_id={}", session.id, current_user.id)
+    return {"code": 0, "data": {"session_id": session.id, "cancelled": True}, "message": "已请求取消"}
