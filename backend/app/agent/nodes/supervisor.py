@@ -617,8 +617,44 @@ def _finish_done(
             break
     intent = "rag" if last_agent == NEXT_RAG else ("tool" if last_agent == NEXT_TOOL else "chitchat")
 
-    # 在发送 done 结束信号前，先推送一次“所有任务均已完成 (completed)”的最终 task_plan，确保前端渲染完美打勾
+    # ---------- final_answer 兜底（关键修复）----------
+    # 场景：用户在 tool_agent 工具循环跑完工具、但还没让 LLM 总结输出时点了停止。
+    # tool_agent 的 turn=N 入口 break 跳出 → return 时 final_answer="" → state.final_answer 被覆盖为空
+    # 用户随后发"继续" → supervisor 重跑 → 看到所有 step 已 completed → 来到 _finish_done
+    # 此时 state.final_answer 仍为空，会导致 chat_resume_stream 保存 assistant_msg.content="（无输出）"
+    # 修复：从 tool_calls 倒序找最有价值的 result（skill > tool）作为 final_answer 兜底
+    final_answer = state.get("final_answer", "") or ""
+    if not final_answer:
+        tool_calls = state.get("tool_calls", []) or []
+        # 优先从 skill 类型的 tool_call 取（如 research_assistant 的报告）
+        for tc in reversed(tool_calls):
+            if tc.get("kind") == "skill":
+                result = tc.get("result")
+                if isinstance(result, str) and result.strip():
+                    final_answer = result
+                    logger.info(
+                        "[Supervisor._finish_done] final_answer 为空，使用最近 skill '{}' 的 result 作为兜底 ({} 字)",
+                        tc.get("name"), len(final_answer)
+                    )
+                    break
+        # 退而求其次：用最近的非 error tool_call result
+        if not final_answer:
+            for tc in reversed(tool_calls):
+                result = tc.get("result")
+                if isinstance(result, str) and result.strip() and "error" not in (result[:50].lower()):
+                    final_answer = result
+                    logger.info(
+                        "[Supervisor._finish_done] 使用最近 tool '{}' 的 result 作为兜底 ({} 字)",
+                        tc.get("name"), len(final_answer)
+                    )
+                    break
+
+    # 推送 chunks（如果 final_answer 是兜底拿到的，需要主动推给前端，否则前端 chat 框还是空）
     if token_queue:
+        # 仅当 state 中没有 final_answer（即兜底场景）时才推 chunk —— 正常路径下 tool_agent 已经推过了
+        if final_answer and not (state.get("final_answer", "") or ""):
+            token_queue.put(("chunk", final_answer))
+        # 在发送 done 结束信号前，先推送一次"所有任务均已完成 (completed)"的最终 task_plan，确保前端渲染完美打勾
         token_queue.put(("meta", {
             "intent": intent,
             "route_reason": reason or "所有步骤已完成",
@@ -631,6 +667,7 @@ def _finish_done(
         "intent": intent,
         "route_reason": reason,
         "task_plan": task_plan,
+        "final_answer": final_answer,  # 兜底后的 final_answer 写回 state
         "agent_iterations": iterations + 1,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
