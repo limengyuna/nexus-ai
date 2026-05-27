@@ -625,6 +625,30 @@ class ChatService:
             return
         user_input = user_msg.content
 
+        # ---------- Cursor 风格智能续跑：识别 decision.user_message ----------
+        # 当用户在中断后发送新消息时，前端会把消息作为 decision.user_message 传过来。
+        # 这里要做两件事：
+        # 1) 写一条新的 user_message 到 db（保持对话历史完整）
+        # 2) 把它附加到 user_input 上下文，并保留在 decision 中给 supervisor 节点使用
+        # supervisor 节点会从 Command(resume=decision) 的返回值里读到 user_message，
+        # 注入 LLM 上下文，由 LLM 自己判断：续跑剩余 step 还是放弃旧 plan 重新规划。
+        new_user_message_text = (decision or {}).get("user_message")
+        if new_user_message_text:
+            logger.info(
+                "[ChatService.resume] 检测到用户中断后的新消息，写入 db 并注入 decision: '{}...'",
+                new_user_message_text[:50]
+            )
+            new_user_msg = ChatMessage(
+                session_id=session.id,
+                role=MessageRole.USER,
+                content=new_user_message_text,
+            )
+            db.add(new_user_msg)
+            db.commit()
+            db.refresh(new_user_msg)
+            # 把 user_input 也更新为最新消息（用于后续会话标题、错误日志等）
+            user_input = new_user_message_text
+
         yield ("status", {"step": "resuming", "user_msg_id": user_msg_id})
 
         # 准备流式队列与 thread 配置

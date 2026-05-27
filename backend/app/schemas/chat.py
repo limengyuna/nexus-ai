@@ -55,11 +55,18 @@ class ChatRequest(BaseModel):
 
 
 class ChatResumeRequest(BaseModel):
-    """中断恢复请求（用户审批后调用）"""
+    """中断恢复请求（用户审批后调用 / 用户主动中断后续跑）"""
     user_msg_id: int = Field(..., description="被中断对话轮次对应的原始用户消息 ID（thread_id 来源）")
-    action: str = Field(..., pattern="^(approve|reject)$", description="审批动作：approve / reject")
+    # action 三种语义：
+    # - approve / reject：工具审批弹窗的批准 / 拒绝
+    # - continue：用户主动中断后的智能续跑（Cursor 风格）—— 由用户下次发消息自动触发
+    action: str = Field(..., pattern="^(approve|reject|continue)$", description="审批动作 / 续跑动作")
     reason: Optional[str] = Field(None, max_length=500, description="拒绝/批准理由（可选，发给 LLM 作为上下文）")
     edited_args: Optional[dict] = Field(None, description="批准时可选：用户编辑后的工具参数（如修改文件路径）")
+    # action=continue 时携带：用户中断后追加的新消息内容
+    # 后端 chat_resume_stream 会把它写入 db 并注入 supervisor 的 context_messages，
+    # 由 supervisor LLM 判断是续跑剩余 step 还是重新规划
+    user_message: Optional[str] = Field(None, max_length=10000, description="用户中断后追加的新消息（仅 action=continue 时有效）")
 
 
 class ChatResponse(BaseModel):

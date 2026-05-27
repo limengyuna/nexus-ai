@@ -590,45 +590,7 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </transition>
 
-      <!-- 被用户主动中断的"继续"卡片（cancelled-interrupt 时显示） -->
-      <transition
-        enter-active-class="transition-all duration-300 ease-out"
-        enter-from-class="opacity-0 translate-y-4"
-        enter-to-class="opacity-100 translate-y-0"
-        leave-active-class="transition-all duration-200 ease-in"
-        leave-from-class="opacity-100 translate-y-0"
-        leave-to-class="opacity-0 translate-y-4"
-      >
-        <div
-          v-if="chat.interruptedUserMsgId && !chat.sending && !chat.pendingApproval"
-          class="mx-6 mb-3 rounded-xl border border-blue-300 dark:border-blue-600 bg-blue-50 dark:bg-blue-900/20 shadow-md overflow-hidden"
-        >
-          <div class="flex items-center gap-2 px-4 py-3 bg-blue-100/70 dark:bg-blue-800/30 border-b border-blue-200 dark:border-blue-700">
-            <span class="text-blue-600 dark:text-blue-400 text-lg">⏸</span>
-            <span class="text-sm font-semibold text-blue-800 dark:text-blue-200">任务已暂停</span>
-            <span class="ml-auto text-xs text-blue-600 dark:text-blue-300">已完成的步骤会被保留，不会重做</span>
-          </div>
-          <div class="px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
-            点击下方"继续"从中断点恢复执行；如果想换个问题，直接在输入框发送即可（老进度将被放弃）。
-          </div>
-          <div class="flex items-center gap-3 px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10">
-            <button
-              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
-              :disabled="chat.sending"
-              @click="chat.continueInterrupted()"
-            >
-              <span>▶</span>
-              <span>继续</span>
-            </button>
-            <button
-              class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 transition-colors"
-              @click="chat.interruptedUserMsgId = null"
-            >
-              放弃
-            </button>
-          </div>
-        </div>
-      </transition>
+      <!-- 中断后无任何特殊 UI（Cursor 风格）：用户下次发消息时由 store 自动智能续跑 -->
 
       <!-- 错误提示 -->
       <div v-if="errorMsg" class="px-6 py-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs flex items-center justify-between">

@@ -187,6 +187,10 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     task_plan = state.get("task_plan", [])
     context_messages = state.get("context_messages", [])
 
+    # 用户中断后追加的新消息（仅在 cancel-interrupt resume 后非空）
+    # 用于 _planning_phase / _execution_phase 的 prompt，让 LLM 判断是续跑还是重新规划
+    user_continuation = ""
+
     # ---------- 协作式取消：用户主动中断（真断点续传方案）----------
     # Supervisor 是图里所有路径的必经之路，在这里检查能保证：
     # 无论中断时图正在哪个子 Agent，最迟回到 supervisor 时就能停下。
@@ -218,8 +222,32 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
         # resume 时此处直接返回 decision，节点正常往下跑（supervisor 继续根据 task_plan 派发）
         from langgraph.types import interrupt
         decision = interrupt(cancelled_payload)
-        # resume 后 decision 形如 {"action": "continue"}；继续往下走正常 supervisor 逻辑
-        logger.info("[Supervisor] cancel-interrupt 已恢复，decision={} 继续 supervisor 派发", decision)
+        # resume 后 decision 形如：
+        #   {"action": "continue"}                          —— 用户直接续跑（无新消息）
+        #   {"action": "continue", "user_message": "..."}   —— 用户中断后发了新消息（Cursor 风格）
+        logger.info("[Supervisor] cancel-interrupt 已恢复，decision={}", decision)
+
+        # ---------- Cursor 风格智能续跑：把用户的新消息注入到 context_messages ----------
+        # 这是整个"中断 + 智能续跑"机制的核心：
+        # - 用户中断后发的新消息会被前端 _smartResume 通过 decision.user_message 传过来
+        # - 我们把它作为一条新的 user message append 到 context_messages 末尾
+        # - 之后 _execution_phase / _planning_phase 调用 LLM 时会看到这条新消息
+        # - LLM 自然能判断："如果新消息表达继续意图就按 task_plan 派发剩余 step；
+        #                    如果表达换话题就 action=adjust 重新规划"
+        # 已完成的 step 状态保留在 task_plan 里（status=done），LLM 看得到，自然不会重做
+        user_continuation = (decision or {}).get("user_message") or ""
+        if user_continuation:
+            logger.info(
+                "[Supervisor] 收到用户中断后追加消息，注入 context_messages: '{}...'",
+                user_continuation[:80]
+            )
+            # 注入到本次节点执行使用的 context_messages（局部变量）
+            context_messages = list(context_messages) + [
+                {"role": "user", "content": user_continuation}
+            ]
+            # 注意：此处不直接修改 user_input —— 因为 user_input 是首次提问的内容，
+            # 保留它便于 LLM 理解"原始任务 vs 中断后追加指令"的对比。
+            # _execution_phase 的 prompt 已经能看到 context_messages 末尾的新消息（通过 LLM 上下文）
 
     has_kb = kb_id is not None
     mcp_info = _get_mcp_info(user_id)
@@ -251,7 +279,8 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     if iterations == 0:
         return _planning_phase(
             state, llm, has_kb, mcp_info, context_messages,
-            user_input, token_queue, started_at
+            user_input, token_queue, started_at,
+            user_continuation=user_continuation,
         )
 
     # ==========================================================
@@ -259,7 +288,8 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     # ==========================================================
     return _execution_phase(
         state, llm, task_plan, context_messages,
-        user_input, final_answer, token_queue, iterations, started_at
+        user_input, final_answer, token_queue, iterations, started_at,
+        user_continuation=user_continuation,
     )
 
 
@@ -268,9 +298,11 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
 def _planning_phase(
     state: AgentState, llm, has_kb: bool, mcp_info: List[Dict[str, str]],
     context_messages: List[Dict], user_input: str,
-    token_queue, started_at: float
+    token_queue, started_at: float,
+    user_continuation: str = "",
 ) -> Dict[str, Any]:
-    """首次调用：LLM 分析请求，生成 task_plan"""
+    """首次调用：LLM 分析请求，生成 task_plan
+    user_continuation: 用户中断后追加的新消息（一般 iterations==0 时为空，仅为兼容签名）"""
     node_tokens = 0
     system_prompt = _build_planning_prompt(has_kb, mcp_info)
 
@@ -398,9 +430,11 @@ def _planning_phase(
 def _execution_phase(
     state: AgentState, llm, task_plan: List[Dict],
     context_messages: List[Dict], user_input: str, final_answer: str,
-    token_queue, iterations: int, started_at: float
+    token_queue, iterations: int, started_at: float,
+    user_continuation: str = "",
 ) -> Dict[str, Any]:
-    """子 Agent 完成后：LLM 判断下一步"""
+    """子 Agent 完成后：LLM 判断下一步
+    user_continuation: 用户在中断后追加的新消息——非空时 LLM 需判断是续跑还是改方向"""
     node_tokens = 0
 
     # 标记当前执行中的步骤为 completed
@@ -423,12 +457,25 @@ def _execution_phase(
     system_prompt = _build_step_check_prompt()
     plan_summary = json.dumps(task_plan, ensure_ascii=False, indent=2)
 
+    # 用户中断后追加消息的提示段（仅当非空时呈现给 LLM）
+    continuation_section = ""
+    if user_continuation:
+        continuation_section = (
+            f"\n\n⚠️ 用户中断后追加了新消息：\n「{user_continuation}」\n"
+            f"请优先理解这条新消息的意图：\n"
+            f"  - 如果用户表达「继续/接着做/继续执行」等续跑意图 → action=next 派发剩余 pending 步骤\n"
+            f"  - 如果用户表达「不用了/算了/换个问题/不要这个了」等放弃意图 → action=adjust 用 adjusted_plan 重新规划（可以为空表示直接 finish）\n"
+            f"  - 如果用户给出新指令（如「跳过第二步」「改用别的工具」）→ action=adjust 调整剩余步骤\n"
+            f"  - 已 completed 的步骤不可重做，只能针对 pending 步骤调整\n"
+        )
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": (
             f"用户原始请求：{user_input}\n\n"
             f"当前执行计划：\n{plan_summary}\n\n"
-            f"最新执行结果（摘要）：\n{final_answer[:1500]}\n\n"
+            f"最新执行结果（摘要）：\n{final_answer[:1500]}\n"
+            f"{continuation_section}\n"
             "请决定下一步。严格输出 JSON。"
         )},
     ]
