@@ -187,67 +187,29 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     task_plan = state.get("task_plan", [])
     context_messages = state.get("context_messages", [])
 
-    # 用户中断后追加的新消息（仅在 cancel-interrupt resume 后非空）
-    # 用于 _planning_phase / _execution_phase 的 prompt，让 LLM 判断是续跑还是重新规划
-    user_continuation = ""
-
-    # ---------- 协作式取消：用户主动中断（真断点续传方案）----------
-    # Supervisor 是图里所有路径的必经之路，在这里检查能保证：
-    # 无论中断时图正在哪个子 Agent，最迟回到 supervisor 时就能停下。
+    # ---------- 协作式取消：用户主动中断（"取消即终止"方案）----------
+    # 设计演进说明：
+    # 早期版本用 LangGraph interrupt() 暂停 graph + Command(resume) 智能续跑（"Cursor 风格"），
+    # 但实践中发现这套机制存在心智模型不一致——用户的"继续" ≠ 系统的"复用半成品状态"。
+    # 改造为业界主流做法：用户取消 → 直接终止当前轮次，下次发消息走新一轮 graph 执行。
     #
-    # 关键设计：用 interrupt() 而不是 return next=FINISH
-    # - interrupt() 让 graph 暂停在本节点边界，Checkpointer 自动保存"待恢复"state
-    # - 用户点"继续"按钮 → /resume 端点用 Command(resume={...}) 让节点重跑
-    # - 重跑时 cancel flag 已被清（chat_resume_stream 入口清理），不会再次 interrupt
-    # - LangGraph 机制：interrupt() 在 resume 时直接返回 decision，节点正常往下跑
-    # - supervisor 继续跑会读取 task_plan 中已完成的步骤，直接派发下一步，
-    #   不会重做 tool_agent 已完成的工作（如 research_assistant 调研）
+    # 跨轮记忆机制：当前 task_plan 的 step 状态（completed / cancelled）通过
+    # ChatMessage.task_plan_meta 字段持久化（chat_service 写入），下一轮 supervisor
+    # 规划阶段（_planning_phase）会读取它，让 LLM 知道哪些 step 已完成、跳过它们重做未完成的。
     if is_cancelled(session_id):
         logger.info(
-            "[Supervisor] 检测到用户取消信号，触发 interrupt 等待续跑 (session_id={}, task_plan_steps={})",
+            "[Supervisor] 检测到用户取消信号，终止当前轮次 (session_id={}, task_plan_steps={})",
             session_id, len(task_plan)
         )
-        # 推一个 cancelled 事件给前端，让前端立刻显示"继续"按钮
-        # 注：user_msg_id 由 chat_service 在外层 interrupt 检测时注入到事件 payload 中
-        cancelled_payload = {
-            "type": "cancelled",
-            "task_plan": task_plan,
-            "intent": "cancelled",
-            "route_reason": "用户主动中断",
-            "message": "已暂停。点击\"继续\"可从中断点恢复执行（不会重做已完成的步骤）",
-        }
-        if token_queue:
-            token_queue.put(("approval_pending", cancelled_payload))  # 复用同一个事件通道，前端按 type 区分
-        # 调用 interrupt：首次调用抛 GraphInterrupt 让 graph 暂停；
-        # resume 时此处直接返回 decision，节点正常往下跑（supervisor 继续根据 task_plan 派发）
-        from langgraph.types import interrupt
-        decision = interrupt(cancelled_payload)
-        # resume 后 decision 形如：
-        #   {"action": "continue"}                          —— 用户直接续跑（无新消息）
-        #   {"action": "continue", "user_message": "..."}   —— 用户中断后发了新消息（Cursor 风格）
-        logger.info("[Supervisor] cancel-interrupt 已恢复，decision={}", decision)
-
-        # ---------- Cursor 风格智能续跑：把用户的新消息注入到 context_messages ----------
-        # 这是整个"中断 + 智能续跑"机制的核心：
-        # - 用户中断后发的新消息会被前端 _smartResume 通过 decision.user_message 传过来
-        # - 我们把它作为一条新的 user message append 到 context_messages 末尾
-        # - 之后 _execution_phase / _planning_phase 调用 LLM 时会看到这条新消息
-        # - LLM 自然能判断："如果新消息表达继续意图就按 task_plan 派发剩余 step；
-        #                    如果表达换话题就 action=adjust 重新规划"
-        # 已完成的 step 状态保留在 task_plan 里（status=done），LLM 看得到，自然不会重做
-        user_continuation = (decision or {}).get("user_message") or ""
-        if user_continuation:
-            logger.info(
-                "[Supervisor] 收到用户中断后追加消息，注入 context_messages: '{}...'",
-                user_continuation[:80]
-            )
-            # 注入到本次节点执行使用的 context_messages（局部变量）
-            context_messages = list(context_messages) + [
-                {"role": "user", "content": user_continuation}
-            ]
-            # 注意：此处不直接修改 user_input —— 因为 user_input 是首次提问的内容，
-            # 保留它便于 LLM 理解"原始任务 vs 中断后追加指令"的对比。
-            # _execution_phase 的 prompt 已经能看到 context_messages 末尾的新消息（通过 LLM 上下文）
+        # 把当前 in_progress / pending 的 step 标为 cancelled，让下一轮 LLM 看到"哪些被中断了"
+        for step in task_plan:
+            if step.get("status") in ("in_progress", "pending"):
+                step["status"] = "cancelled"
+        # 直接走 _finish_done 终止本轮（cancelled 标志让兜底逻辑写"已停止"，不去拼 tool_calls 结果）
+        return _finish_done(
+            state, task_plan, token_queue, iterations, started_at, 0,
+            reason="用户主动中断", cancelled=True,
+        )
 
     has_kb = kb_id is not None
     mcp_info = _get_mcp_info(user_id)
@@ -280,7 +242,6 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
         return _planning_phase(
             state, llm, has_kb, mcp_info, context_messages,
             user_input, token_queue, started_at,
-            user_continuation=user_continuation,
         )
 
     # ==========================================================
@@ -289,7 +250,6 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
     return _execution_phase(
         state, llm, task_plan, context_messages,
         user_input, final_answer, token_queue, iterations, started_at,
-        user_continuation=user_continuation,
     )
 
 
@@ -299,12 +259,34 @@ def _planning_phase(
     state: AgentState, llm, has_kb: bool, mcp_info: List[Dict[str, str]],
     context_messages: List[Dict], user_input: str,
     token_queue, started_at: float,
-    user_continuation: str = "",
 ) -> Dict[str, Any]:
-    """首次调用：LLM 分析请求，生成 task_plan
-    user_continuation: 用户中断后追加的新消息（一般 iterations==0 时为空，仅为兼容签名）"""
+    """首次调用：LLM 分析请求，生成 task_plan"""
     node_tokens = 0
     system_prompt = _build_planning_prompt(has_kb, mcp_info)
+
+    # ---------- 跨轮记忆：上一轮被中断的 task_plan ----------
+    # state.last_task_plan_meta 由 chat_service 在调用 graph 前从上一轮 ChatMessage.task_plan_meta 注入。
+    # 如果上一轮被用户中断（meta.interrupted=True），把 task_plan 状态拼到 prompt，
+    # 让 LLM 看到 "哪些 step 已完成（completed）/ 哪些被中断（cancelled）"，
+    # 自然在新一轮的 plan 里跳过已完成的、重做被中断的。
+    last_meta = state.get("last_task_plan_meta") or {}
+    if last_meta.get("interrupted") and last_meta.get("task_plan"):
+        prev_plan = last_meta["task_plan"]
+        plan_summary_lines = []
+        for st in prev_plan:
+            status = st.get("status", "")
+            mark = "✓ 已完成" if status == "completed" else ("✗ 用户中断" if status == "cancelled" else f"({status})")
+            plan_summary_lines.append(f"  - step {st.get('step')}: {st.get('instruction', '')[:80]} {mark}")
+        plan_summary = "\n".join(plan_summary_lines)
+        system_prompt += (
+            "\n\n📌 上一轮任务执行情况（用户中断了）：\n"
+            f"{plan_summary}\n\n"
+            "请基于上述情况生成新一轮 plan：\n"
+            "  - **已完成（✓）的 step 不要再做** —— 用户和系统都已认可这些步骤已经成功，重做没意义；\n"
+            "  - **被中断（✗）的 step 如果用户当前消息是「继续/接着做」等续跑意图，必须重新规划这些步骤**；\n"
+            "  - 如果用户当前消息是新需求（换话题、新指令），按新需求重新规划，不必延续上一轮的 plan。\n"
+        )
+        logger.info("[Supervisor._planning_phase] 注入上一轮被中断的 task_plan 上下文（{} 个 step）", len(prev_plan))
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -431,10 +413,8 @@ def _execution_phase(
     state: AgentState, llm, task_plan: List[Dict],
     context_messages: List[Dict], user_input: str, final_answer: str,
     token_queue, iterations: int, started_at: float,
-    user_continuation: str = "",
 ) -> Dict[str, Any]:
-    """子 Agent 完成后：LLM 判断下一步
-    user_continuation: 用户在中断后追加的新消息——非空时 LLM 需判断是续跑还是改方向"""
+    """子 Agent 完成后：LLM 判断下一步"""
     node_tokens = 0
 
     # 标记当前执行中的步骤为 completed
@@ -457,25 +437,12 @@ def _execution_phase(
     system_prompt = _build_step_check_prompt()
     plan_summary = json.dumps(task_plan, ensure_ascii=False, indent=2)
 
-    # 用户中断后追加消息的提示段（仅当非空时呈现给 LLM）
-    continuation_section = ""
-    if user_continuation:
-        continuation_section = (
-            f"\n\n⚠️ 用户中断后追加了新消息：\n「{user_continuation}」\n"
-            f"请优先理解这条新消息的意图：\n"
-            f"  - 如果用户表达「继续/接着做/继续执行」等续跑意图 → action=next 派发剩余 pending 步骤\n"
-            f"  - 如果用户表达「不用了/算了/换个问题/不要这个了」等放弃意图 → action=adjust 用 adjusted_plan 重新规划（可以为空表示直接 finish）\n"
-            f"  - 如果用户给出新指令（如「跳过第二步」「改用别的工具」）→ action=adjust 调整剩余步骤\n"
-            f"  - 已 completed 的步骤不可重做，只能针对 pending 步骤调整\n"
-        )
-
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": (
             f"用户原始请求：{user_input}\n\n"
             f"当前执行计划：\n{plan_summary}\n\n"
-            f"最新执行结果（摘要）：\n{final_answer[:1500]}\n"
-            f"{continuation_section}\n"
+            f"最新执行结果（摘要）：\n{final_answer[:1500]}\n\n"
             "请决定下一步。严格输出 JSON。"
         )},
     ]
@@ -601,13 +568,18 @@ def _dispatch_step(
 
 def _finish_done(
     state: AgentState, task_plan: List[Dict],
-    token_queue, iterations: int, started_at: float, node_tokens: int, reason: str
+    token_queue, iterations: int, started_at: float, node_tokens: int, reason: str,
+    cancelled: bool = False,
 ) -> Dict[str, Any]:
-    """所有步骤完成，发送 done 信号"""
-    # 把所有剩余的 pending/in_progress 步骤标记为 completed（LLM 判断任务已完成）
-    for step in task_plan:
-        if step.get("status") in ("pending", "in_progress"):
-            step["status"] = "completed"
+    """所有步骤完成（或被用户取消），发送 done 信号
+    cancelled=True 时：写"已停止"占位文案，让用户下次发"继续"重做未完成的 step
+    cancelled=False 时：正常 finish，按 skill > tool 优先级兜底 final_answer"""
+    # 仅在正常 finish 场景把 pending/in_progress 标 completed
+    # cancelled 场景调用方已经把 in_progress/pending 标为 cancelled，这里不动
+    if not cancelled:
+        for step in task_plan:
+            if step.get("status") in ("pending", "in_progress"):
+                step["status"] = "completed"
 
     # 确定最终 intent（取最后一个 completed 步骤的 agent 类型）
     last_agent = ""
@@ -615,49 +587,66 @@ def _finish_done(
         if step.get("status") == "completed":
             last_agent = step["agent"]
             break
-    intent = "rag" if last_agent == NEXT_RAG else ("tool" if last_agent == NEXT_TOOL else "chitchat")
+    intent = "cancelled" if cancelled else (
+        "rag" if last_agent == NEXT_RAG else ("tool" if last_agent == NEXT_TOOL else "chitchat")
+    )
 
-    # ---------- final_answer 兜底（关键修复）----------
-    # 场景：用户在 tool_agent 工具循环跑完工具、但还没让 LLM 总结输出时点了停止。
-    # tool_agent 的 turn=N 入口 break 跳出 → return 时 final_answer="" → state.final_answer 被覆盖为空
-    # 用户随后发"继续" → supervisor 重跑 → 看到所有 step 已 completed → 来到 _finish_done
-    # 此时 state.final_answer 仍为空，会导致 chat_resume_stream 保存 assistant_msg.content="（无输出）"
-    # 修复：从 tool_calls 倒序找最有价值的 result（skill > tool）作为 final_answer 兜底
+    # ---------- final_answer 处理 ----------
     final_answer = state.get("final_answer", "") or ""
-    if not final_answer:
-        tool_calls = state.get("tool_calls", []) or []
-        # 优先从 skill 类型的 tool_call 取（如 research_assistant 的报告）
-        for tc in reversed(tool_calls):
-            if tc.get("kind") == "skill":
-                result = tc.get("result")
-                if isinstance(result, str) and result.strip():
-                    final_answer = result
-                    logger.info(
-                        "[Supervisor._finish_done] final_answer 为空，使用最近 skill '{}' 的 result 作为兜底 ({} 字)",
-                        tc.get("name"), len(final_answer)
-                    )
-                    break
-        # 退而求其次：用最近的非 error tool_call result
-        if not final_answer:
-            for tc in reversed(tool_calls):
-                result = tc.get("result")
-                if isinstance(result, str) and result.strip() and "error" not in (result[:50].lower()):
-                    final_answer = result
-                    logger.info(
-                        "[Supervisor._finish_done] 使用最近 tool '{}' 的 result 作为兜底 ({} 字)",
-                        tc.get("name"), len(final_answer)
-                    )
-                    break
 
-    # 推送 chunks（如果 final_answer 是兜底拿到的，需要主动推给前端，否则前端 chat 框还是空）
+    if cancelled:
+        # 用户主动取消：写一段简洁的"已停止"占位，提示用户可以发"继续"重做未完成的 step
+        # 不去拼 tool_calls 结果（避免出现"Successfully wrote..."这种状态字符串作为答案）
+        completed_count = sum(1 for s in task_plan if s.get("status") == "completed")
+        cancelled_count = sum(1 for s in task_plan if s.get("status") == "cancelled")
+        if completed_count > 0 and cancelled_count > 0:
+            cancel_msg = f"⏸️ 已停止。\n\n已完成 {completed_count} 个步骤，剩余 {cancelled_count} 个步骤被中断。\n\n如需继续，请发送「继续」或重新描述需求。"
+        elif cancelled_count > 0:
+            cancel_msg = "⏸️ 已停止。\n\n如需继续，请发送「继续」或重新描述需求。"
+        else:
+            cancel_msg = "⏸️ 已停止。"
+        # 用户取消场景：固定写占位文案，覆盖任何已有的部分输出
+        final_answer = cancel_msg
+    else:
+        # 正常 finish 但 final_answer 为空：按 skill > tool 优先级兜底
+        # （场景：tool_agent 跑完工具但 LLM 总结失败、超时强制结束等）
+        if not final_answer:
+            tool_calls = state.get("tool_calls", []) or []
+            for tc in reversed(tool_calls):
+                if tc.get("kind") == "skill":
+                    result = tc.get("result")
+                    if isinstance(result, str) and result.strip():
+                        final_answer = result
+                        logger.info(
+                            "[Supervisor._finish_done] final_answer 为空，使用最近 skill '{}' 的 result 作为兜底 ({} 字)",
+                            tc.get("name"), len(final_answer)
+                        )
+                        break
+            if not final_answer:
+                for tc in reversed(tool_calls):
+                    result = tc.get("result")
+                    if isinstance(result, str) and result.strip() and "error" not in (result[:50].lower()):
+                        final_answer = result
+                        logger.info(
+                            "[Supervisor._finish_done] 使用最近 tool '{}' 的 result 作为兜底 ({} 字)",
+                            tc.get("name"), len(final_answer)
+                        )
+                        break
+
+    # 推送 chunks（如果 final_answer 是兜底/取消占位拿到的，需要主动推给前端）
     if token_queue:
-        # 仅当 state 中没有 final_answer（即兜底场景）时才推 chunk —— 正常路径下 tool_agent 已经推过了
+        # 仅当 state 中原本没有 final_answer（即兜底/取消场景）时才推 chunk
+        # 正常路径下 tool_agent 已经推过 chunk 了，避免重复推
         if final_answer and not (state.get("final_answer", "") or ""):
             token_queue.put(("chunk", final_answer))
-        # 在发送 done 结束信号前，先推送一次"所有任务均已完成 (completed)"的最终 task_plan，确保前端渲染完美打勾
+        elif cancelled:
+            # 取消场景必须强制推送占位文案，覆盖前端 chat 框（即使 state 中有部分 final_answer）
+            # 前端 assistantRef.content 之前可能累积了部分 LLM 输出，append cancel_msg 让用户看到状态
+            token_queue.put(("chunk", "\n\n" + final_answer if state.get("final_answer") else final_answer))
+        # 推送最终 task_plan 状态（含 cancelled 标记），让前端渲染中断信息
         token_queue.put(("meta", {
             "intent": intent,
-            "route_reason": reason or "所有步骤已完成",
+            "route_reason": reason or ("用户中断" if cancelled else "所有步骤已完成"),
             "task_plan": task_plan,
         }))
         token_queue.put(("done", None))
@@ -667,12 +656,12 @@ def _finish_done(
         "intent": intent,
         "route_reason": reason,
         "task_plan": task_plan,
-        "final_answer": final_answer,  # 兜底后的 final_answer 写回 state
+        "final_answer": final_answer,
         "agent_iterations": iterations + 1,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "supervisor", started_at,
-            input_summary={"iteration": iterations},
+            input_summary={"iteration": iterations, "cancelled": cancelled},
             output_summary={"next": NEXT_FINISH, "reason": reason, "tokens": node_tokens},
         ),
     }

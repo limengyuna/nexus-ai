@@ -433,6 +433,21 @@ class ChatService:
         if maybe_warn(user_input, session.user_id):
             effective_summary += GUARD_REINFORCEMENT
 
+        # ---------- 跨轮续跑：从上一轮 assistant 消息读取 task_plan_meta ----------
+        # 如果上一轮被用户取消（interrupted=True），把 task_plan 状态注入 initial_state，
+        # supervisor 规划阶段会读取它，让 LLM 知道哪些 step 已完成、跳过它们，重做被中断的 step。
+        last_task_plan_meta = None
+        if history_msgs:
+            for hm in reversed(history_msgs):
+                if hm.role == MessageRole.ASSISTANT and hm.task_plan_meta:
+                    last_task_plan_meta = hm.task_plan_meta
+                    if last_task_plan_meta.get("interrupted"):
+                        logger.info(
+                            "[ChatService.chat_stream] 检测到上一轮被中断的 task_plan ({} 个 step)，注入 state.last_task_plan_meta",
+                            len(last_task_plan_meta.get("task_plan", []))
+                        )
+                    break
+
         token_queue: queue_mod.Queue = queue_mod.Queue()
         initial_state = make_initial_state(
             user_input=user_input,
@@ -441,6 +456,8 @@ class ChatService:
             kb_id=session.kb_id,
             summary=effective_summary,
         )
+        # 注入上一轮被中断的 task_plan_meta（None 时 supervisor 自然跳过此分支）
+        initial_state["last_task_plan_meta"] = last_task_plan_meta
         # 流式队列注册到全局表（state 不再持有 Queue，避免 Checkpointer 序列化失败）
         from app.agent.stream_queue import register_queue, unregister_queue
         from app.agent.cancel_registry import clear_cancel
@@ -516,12 +533,28 @@ class ChatService:
         except Exception:
             tool_calls_payload = [{"error": "serialization_failed"}]
 
+        # ---------- task_plan_meta：持久化任务计划状态，供下一轮 supervisor 续跑使用 ----------
+        # 任意有 task_plan 的 assistant 消息都保存 meta（不止取消场景）；
+        # interrupted 标志位让下一轮 supervisor 知道是不是被中断的轮次。
+        task_plan_meta_payload = None
+        final_task_plan = final_state.get("task_plan", []) or []
+        if final_task_plan:
+            try:
+                task_plan_serialized = json.loads(json.dumps(final_task_plan, default=str))
+                task_plan_meta_payload = {
+                    "task_plan": task_plan_serialized,
+                    "interrupted": intent == "cancelled",  # supervisor 取消场景设置 intent="cancelled"
+                }
+            except Exception:
+                task_plan_meta_payload = None
+
         assistant_msg = ChatMessage(
             session_id=session.id,
             role=MessageRole.ASSISTANT,
             content=answer,
             agent_source=src,
             tool_calls_json=tool_calls_payload,
+            task_plan_meta=task_plan_meta_payload,
             token_usage=final_state.get("total_tokens", 0) or None,
         )
         db.add(assistant_msg)
@@ -625,30 +658,6 @@ class ChatService:
             return
         user_input = user_msg.content
 
-        # ---------- Cursor 风格智能续跑：识别 decision.user_message ----------
-        # 当用户在中断后发送新消息时，前端会把消息作为 decision.user_message 传过来。
-        # 这里要做两件事：
-        # 1) 写一条新的 user_message 到 db（保持对话历史完整）
-        # 2) 把它附加到 user_input 上下文，并保留在 decision 中给 supervisor 节点使用
-        # supervisor 节点会从 Command(resume=decision) 的返回值里读到 user_message，
-        # 注入 LLM 上下文，由 LLM 自己判断：续跑剩余 step 还是放弃旧 plan 重新规划。
-        new_user_message_text = (decision or {}).get("user_message")
-        if new_user_message_text:
-            logger.info(
-                "[ChatService.resume] 检测到用户中断后的新消息，写入 db 并注入 decision: '{}...'",
-                new_user_message_text[:50]
-            )
-            new_user_msg = ChatMessage(
-                session_id=session.id,
-                role=MessageRole.USER,
-                content=new_user_message_text,
-            )
-            db.add(new_user_msg)
-            db.commit()
-            db.refresh(new_user_msg)
-            # 把 user_input 也更新为最新消息（用于后续会话标题、错误日志等）
-            user_input = new_user_message_text
-
         yield ("status", {"step": "resuming", "user_msg_id": user_msg_id})
 
         # 准备流式队列与 thread 配置
@@ -728,12 +737,26 @@ class ChatService:
         except Exception:
             tool_calls_payload = [{"error": "serialization_failed"}]
 
+        # task_plan_meta 持久化（与 chat_stream 保持一致）
+        task_plan_meta_payload = None
+        final_task_plan = final_state.get("task_plan", []) or []
+        if final_task_plan:
+            try:
+                task_plan_serialized = json.loads(json.dumps(final_task_plan, default=str))
+                task_plan_meta_payload = {
+                    "task_plan": task_plan_serialized,
+                    "interrupted": intent == "cancelled",
+                }
+            except Exception:
+                task_plan_meta_payload = None
+
         assistant_msg = ChatMessage(
             session_id=session.id,
             role=MessageRole.ASSISTANT,
             content=answer,
             agent_source=src,
             tool_calls_json=tool_calls_payload,
+            task_plan_meta=task_plan_meta_payload,
             token_usage=final_state.get("total_tokens", 0) or None,
         )
         db.add(assistant_msg)

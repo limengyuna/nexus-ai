@@ -156,10 +156,10 @@ export interface InterruptEvent {
   payload: InterruptPayload
 }
 
-/** resume 决策：approve/reject 用于工具审批；continue 用于用户主动中断的续跑 */
+/** resume 决策：仅用于工具审批（用户主动取消不走 resume，下次发消息走新一轮 chat_stream） */
 export interface ResumeDecision {
   user_msg_id: number
-  action: 'approve' | 'reject' | 'continue'
+  action: 'approve' | 'reject'
   reason?: string
   edited_args?: Record<string, any> | null
 }

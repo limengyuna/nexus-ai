@@ -117,11 +117,6 @@ export const useChatStore = defineStore('chat', () => {
   // 工具审批状态（当 Agent 调用危险工具触发 interrupt 时填充）
   const pendingApproval = ref<InterruptEvent | null>(null)
 
-  // 被用户主动中断的 user_msg_id（用于显示"继续"按钮 + 调 resume 续跑）
-  // 仅活在前端内存：刷新页面 / 切换会话即消失（与 Cursor、Windsurf 体验一致）
-  // 用户发新消息时由 sendMessageStream 入口清空
-  const interruptedUserMsgId = ref<number | null>(null)
-
   // 最近一次回复的"思考过程"快照
   const lastIntent = ref('')
   const lastRouteReason = ref('')
@@ -212,7 +207,6 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId.value = sessionId
     messages.value = []
     clearTrace()
-    interruptedUserMsgId.value = null  // 切会话清掉"被中断"标记（与 Cursor 体验一致）
     if (sessionId !== null) {
       messages.value = await chatApi.listMessages(sessionId)
       loadThinkingTrace(sessionId)
@@ -335,16 +329,6 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessageStream(content: string): Promise<void> {
     if (!activeSessionId.value || sending.value) return
 
-    // ========== Cursor 风格的智能续跑入口 ==========
-    // 如果存在被用户主动中断的 thread（interruptedUserMsgId 非空），
-    // 把新消息走 /resume 通道传给后端 supervisor，由 LLM 判断：
-    //   - 用户说"继续"/"接着写第二个" → 派发 task_plan 剩余 step（不重做已完成的）
-    //   - 用户说"算了换个问题" → 放弃旧 plan，重新规划
-    // 这样用户**完全无感知** —— 输入框照常发消息即可，后端自动智能处理
-    if (interruptedUserMsgId.value != null) {
-      return _smartResume(content)
-    }
-
     sending.value = true
     clearTrace()
 
@@ -449,20 +433,14 @@ export const useChatStore = defineStore('chat', () => {
           await fetchSessions()
         },
         onInterrupt: (data) => {
-          // 按 payload.type 区分两种中断：tool_approval（工具审批）vs cancelled（用户主动中断）
+          // 取消即终止方案下，后端不再发 cancelled interrupt（直接走 done 结束本轮）。
+          // 这里的 interrupt 仅来自工具审批场景（Q51 HITL）。
+          // 保留 type 分流是为了兼容旧后端或异常情况——cancelled 类型不弹审批卡片，避免 UI 错乱。
           if (data.payload?.type === 'cancelled') {
-            // ---------- 用户主动中断的 cancelled-interrupt（Cursor 风格：无 UI 提示）----------
-            // 仅更新 interruptedUserMsgId 这一个内存状态——不在聊天框追加任何文字、不显示卡片。
-            // 用户下次发消息时，sendMessageStream 入口会自动检测此 id，
-            // 走 resume 通道把新消息传给 supervisor，让 LLM 判断是续跑还是重新规划。
-            interruptedUserMsgId.value = data.user_msg_id
-            // 同步 task_plan（已完成的步骤会显示为 done）——仅供思考过程面板展示，不影响主对话区
             const cancelPayload = data.payload as any
-            if (cancelPayload?.task_plan) {
-              lastTaskPlan.value = cancelPayload.task_plan
-            }
+            if (cancelPayload?.task_plan) lastTaskPlan.value = cancelPayload.task_plan
           } else {
-            // ---------- 工具审批的 tool_approval-interrupt ----------
+            // 工具审批的 tool_approval-interrupt
             pendingApproval.value = data
             assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
           }
@@ -583,11 +561,9 @@ export const useChatStore = defineStore('chat', () => {
           }
         },
         onInterrupt: (data) => {
-          // 审批续跑过程中又被中断 —— 必须按 payload.type 分流
-          // （之前漏分流导致 cancelled-interrupt 被误塞进 pendingApproval，显示错误的"批准/拒绝"卡片）
+          // 取消即终止方案下后端不再发 cancelled interrupt。这里 interrupt 仅来自再次工具审批。
+          // 保留 type 分流是兼容旧后端 / 异常场景。
           if (data.payload?.type === 'cancelled') {
-            // 用户主动中断：仅设置 interruptedUserMsgId，无 UI 提示（Cursor 风格）
-            interruptedUserMsgId.value = data.user_msg_id
             const cp = data.payload as any
             if (cp?.task_plan) lastTaskPlan.value = cp.task_plan
           } else {
@@ -637,146 +613,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /**
-   * 智能续跑：用户在中断后发送的新消息
-   *
-   * 工作流：
-   * 1. 前端乐观追加 user + assistant 消息（UX 与 sendMessageStream 一致）
-   * 2. 调 /resume 端点，decision 形如 {action:"continue", user_message: content}
-   * 3. 后端 chat_resume_stream 把 user_message 写入 db，并通过 Command(resume=...) 续跑
-   * 4. supervisor 入口的 interrupt() 返回 decision → 拿到 user_message → 注入 context
-   * 5. supervisor LLM 自动判断：
-   *    - "继续"/"接着..." → 派发 task_plan 剩余 step（已完成的不重做）
-   *    - "算了"/"换个话题" → 放弃旧 plan，重新规划
-   *
-   * 用户完全无感知 —— 看起来跟普通发消息一模一样。
-   */
-  async function _smartResume(content: string): Promise<void> {
-    const userMsgId = interruptedUserMsgId.value!
-    interruptedUserMsgId.value = null  // 立即清除，避免下条消息再次走 resume
-    sending.value = true
-    clearTrace()
-
-    // 乐观追加 user 消息（与 sendMessageStream 体验一致）
-    const optimisticUserMsg: ChatMessage = {
-      id: -Date.now(),
-      session_id: activeSessionId.value!,
-      role: 'user',
-      content,
-      agent_source: 'user',
-      tool_calls_json: null,
-      token_usage: null,
-      created_at: new Date().toISOString(),
-    }
-    messages.value.push(optimisticUserMsg)
-
-    // 乐观追加 assistant 占位
-    const placeholderAssistantId = -Date.now() - 1
-    const assistantMsg: ChatMessage = {
-      id: placeholderAssistantId,
-      session_id: activeSessionId.value!,
-      role: 'assistant',
-      content: '',
-      agent_source: 'router',
-      tool_calls_json: null,
-      token_usage: null,
-      created_at: new Date().toISOString(),
-    }
-    messages.value.push(assistantMsg)
-    const assistantRef = messages.value[messages.value.length - 1]
-
-    const controller = new AbortController()
-    currentAbortController.value = controller
-
-    try {
-      // decision 里携带 user_message —— 后端识别后写 db + 注入 context_messages
-      await chatApi.resumeMessageStream(activeSessionId.value!, {
-        user_msg_id: userMsgId,
-        action: 'continue',
-        // user_message 字段：让后端 supervisor 把它当作"用户最新意图"
-        // 类型断言绕过 ResumeDecision 类型限制（后端透传任意 dict 给 LangGraph Command(resume=...)）
-        user_message: content,
-      } as any, {
-        onStatus: () => {},
-        onMeta: (data: any) => {
-          lastIntent.value = data.intent
-          lastRouteReason.value = data.route_reason
-          lastSkillUsed.value = data.skill_used
-          if (data.task_plan) lastTaskPlan.value = data.task_plan
-          if (data.intent === 'rag') assistantRef.agent_source = 'rag'
-          else if (data.intent === 'tool') assistantRef.agent_source = 'tool'
-          else assistantRef.agent_source = 'router'
-        },
-        onChunk: (text) => {
-          if (assistantRef && assistantRef.role === 'assistant') {
-            assistantRef.content += text
-          }
-        },
-        onInterrupt: (data) => {
-          // 续跑过程中又被中断 —— 同 sendMessageStream 处理
-          if (data.payload?.type === 'cancelled') {
-            interruptedUserMsgId.value = data.user_msg_id
-            const cp = data.payload as any
-            if (cp?.task_plan) lastTaskPlan.value = cp.task_plan
-            // 不在 UI 留任何提示（保持 Cursor 风格）
-          } else {
-            pendingApproval.value = data
-            if (assistantRef && assistantRef.role === 'assistant') {
-              assistantRef.content += '\n\n⚠️ Agent 想要调用一个工具，请在下方审批…'
-            }
-          }
-        },
-        onDone: async (data) => {
-          if (assistantRef && assistantRef.role === 'assistant') {
-            assistantRef.id = data.message_id
-            assistantRef.tool_calls_json = data.tool_calls
-            assistantRef.token_usage = data.token_usage || null
-          }
-          lastTrace.value = data.execution_trace
-          lastToolCalls.value = data.tool_calls
-          lastRetrievedDocs.value = data.retrieved_docs
-          lastRetrievedMemories.value = data.retrieved_memories || []
-          lastFaithfulness.value = data.faithfulness || null
-          if (data.task_plan?.length) lastTaskPlan.value = data.task_plan
-          if (activeSessionId.value) {
-            saveThinkingTrace(activeSessionId.value, data.message_id, {
-              intent: lastIntent.value,
-              route_reason: lastRouteReason.value,
-              skill_used: lastSkillUsed.value,
-              execution_trace: data.execution_trace,
-              tool_calls: data.tool_calls,
-              retrieved_docs: data.retrieved_docs,
-              retrieved_memories: data.retrieved_memories,
-              task_plan: lastTaskPlan.value,
-              decisions: lastDecisions.value,
-              faithfulness: lastFaithfulness.value,
-            })
-          }
-          // 后端可能在 resume 时新写了一条 user message → 重新拉取消息列表保证一致性
-          if (activeSessionId.value) {
-            try {
-              messages.value = await chatApi.listMessages(activeSessionId.value)
-            } catch {/* 忽略：乐观数据已可见 */}
-          }
-          await fetchSessions()
-        },
-        onError: (data) => {
-          if (assistantRef && assistantRef.role === 'assistant') {
-            assistantRef.content += `\n\n[续跑失败] ${data.message}`
-          }
-        },
-      }, controller.signal)
-    } catch (e: any) {
-      const isAbort = e?.name === 'AbortError' || /aborted|abort/i.test(String(e?.message || ''))
-      if (!isAbort && assistantRef && assistantRef.role === 'assistant') {
-        assistantRef.content += `\n\n[续跑出错] ${String(e?.message || e)}`
-      }
-    } finally {
-      sending.value = false
-      currentAbortController.value = null
-    }
-  }
-
   return {
     sessions,
     sessionsLoading,
@@ -805,7 +641,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessageStream,
     stopGenerating,
     resumeApproval,
-    interruptedUserMsgId,
     clearTrace,
     loadThinkingTraceForMessage,
   }

@@ -120,6 +120,14 @@ class AgentState(TypedDict, total=False):
     # 注：流式队列已从 state 移出，改用 app.agent.stream_queue 全局注册表
     # 原因：queue.Queue 无法被 LangGraph Checkpointer 序列化
 
+    # ---------- 跨轮中断续跑 ----------
+    # 上一轮被用户中断时持久化的 task_plan 元信息（来自 ChatMessage.task_plan_meta），
+    # 由 chat_service 在调用 graph 前注入。结构：
+    # {"task_plan": [{"step": 1, "agent": "tool_agent", "instruction": "...", "status": "completed"|"cancelled"}, ...],
+    #  "interrupted": true}
+    # supervisor 规划阶段读取此字段，让 LLM 跳过已完成的 step、重跑被中断的 step。
+    last_task_plan_meta: Optional[Dict[str, Any]]
+
 
 # ---------- 工具函数 ----------
 def make_initial_state(
@@ -157,6 +165,7 @@ def make_initial_state(
         error=None,
         pending_approval=None,
         approval_decision=None,
+        last_task_plan_meta=None,
     )
 
 

@@ -116,6 +116,17 @@ class ChatMessage(Base, TimestampMixin):
         comment="工具调用详情（JSON）",
     )
 
+    # 任务计划元信息（仅 assistant 消息使用），结构：
+    # {"task_plan": [{"step": 1, "agent": "tool_agent", "instruction": "...", "status": "completed"|"cancelled"}, ...],
+    #  "interrupted": true|false}
+    # 用户取消当前轮次时把 task_plan 持久化到此字段，下一轮 supervisor 规划阶段读取它，
+    # 让 LLM 知道哪些 step 已完成、哪些被中断需要重跑——从而避免重复已完成的 step
+    task_plan_meta: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+        comment="任务计划元信息：上一轮 task_plan 状态 + 是否被中断（用于跨轮续跑）",
+    )
+
     # 该消息消耗的 Token 数（便于成本统计）
     token_usage: Mapped[Optional[int]] = mapped_column(
         Integer,

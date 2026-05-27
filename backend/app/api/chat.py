@@ -274,8 +274,6 @@ async def resume_message(
         "action": payload.action,
         "reason": payload.reason or "",
         "edited_args": payload.edited_args,
-        # action="continue" 时携带，让 chat_resume_stream 写入 db 并注入 supervisor 上下文
-        "user_message": payload.user_message or "",
     }
 
     async def event_generator():

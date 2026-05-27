@@ -1008,3 +1008,55 @@ LLM API (stream=True) → 逐 token yield → token_queue.put() → 主线程 as
   → "**从头重跑**。这是 LangGraph 的设计：节点是幂等单元，恢复时整个节点重新执行，但 `interrupt(payload)` 在重跑过程中遇到时会**直接返回缓存的 decision**，不再抛 GraphInterrupt。所以我在 interrupt 之前的代码（LLM 调用、安全工具执行）会重复跑——这要求节点设计要避免不可重复的副作用。"
 - *Q：thread_id 怎么设计的？为什么不用 session_id？*
   → "用的是 `turn-{user_msg_id}`，**每条用户消息一个 thread**。这样一来，多轮对话历史还是由我自己的 DB 管理（`chat_messages` 表），Checkpointer 只负责**单轮内部**的中断恢复。如果用 session_id，会出现跨轮 checkpoint 互相污染、清理时机难定的问题。"
+
+---
+
+### Q52：HITL 审批做完之后还做了什么？聊聊"用户主动取消 + 跨轮续跑"机制（含一次完整的设计反思与重构）⭐ 重点准备（Q51 进阶版 + 产品思维加分）
+
+> "Q51 的工具审批解决的是'**Agent 主动停下问用户**'的场景。后来我做了它的对偶版本——'**用户主动叫停**'：用户在 Agent 跑联网调研时点停止，再发"继续"能从未完成的步骤接着做。这个功能我做了两版，**第一版用 Cursor 风格的 resume 机制（错的方向），第二版改成业界主流的"取消即终止 + 跨轮 meta 续跑"**。这次完整的反思和重构过程，我觉得比单纯讲技术细节更值得说。
+>
+> **第一版（错误方向）**：复用 LangGraph 的 `interrupt() + Command(resume=)` 机制——用户点停止时 supervisor 入口触发 cancel-interrupt 暂停 graph、checkpointer 保存状态；用户下次发消息走 `/resume` 端点续跑，supervisor LLM 读取 user_message 判断是续跑还是换话题。**听起来很优雅，跑通后效果也挺惊艳**——用户输入"继续"几乎瞬间出结果（因为复用了取消瞬间已经跑完的工具结果）。我自我感觉良好地写完了 Q52 的初稿，给老板做演示也没问题。
+>
+> **但用户的一句反问让我意识到设计缺陷**："用户在 step 2 跑了一半点停止，按用户认知 step 2 应该是'**废了**'吧？输入'继续'应该是**重新跑** step 2 才对，怎么变成'复用之前一半的结果'了？这心智不对啊。"
+>
+> 当时我愣了一下，仔细一想确实——**用户视角的'继续'和系统行为的'复用半成品状态'根本不一致**。用户感知是"step 2 没跑完就被我停掉了"，他期望的"继续"语义是"重做被中断的部分"，**不是"复用我都不知道跑了多少的中间状态"**。我做的那套机制只是工程上跑通了，产品语义其实是错的。更糟糕的是：如果 step 2 是非幂等的工具（比如发邮件、调付费 API），"复用半成品状态"还会让用户产生'我已经停止了为什么还出结果'的疑惑——本质上违反了用户对'停止'按钮的最小预期。
+>
+> 我又调研了一下主流 Agent 的做法：Cursor IDE 的 Composer、OpenAI Assistants API、Claude Projects——**全部都是"取消即终止 + 下次新对话"**，没有任何一家做"取消后 resume"。OpenAI Assistants 的 `Run.cancel()` 直接让 Run 进入 cancelled 终态、无法 resume；Cursor 停止后用户重发消息就是新一轮。**我做的 Cursor 风格 resume 本质上是把 Q51 的"审批 HITL"机制错误复用到了"用户主动取消"——这两个场景的 interrupt 语义其实根本不一样**。
+>
+> **第二版（重构后的正确方案）**：完全拆除 cancel-interrupt + resume 路径，改成"**取消即终止 + 跨轮 task_plan meta 续跑**"。核心机制：
+> 1. 用户点停止 → cancel_flag=true → tool_agent 工具循环 break → supervisor 把 in_progress/pending 的 step 标为 `cancelled` 状态 → 直接走 `_finish_done` 终止本轮，DB 写 assistant 消息 content="⏸️ 已停止。已完成 1 个步骤，剩余 1 个被中断。"
+> 2. 关键改动：assistant 消息表新增 `task_plan_meta` JSONB 列，**持久化本轮 task_plan 的完整状态**（每个 step 的 status: completed / cancelled）和 `interrupted` 标志位
+> 3. 用户下次发"继续" → 走**新一轮** `chat_stream`（不是 resume），后端从历史消息读出最近一条 assistant 的 `task_plan_meta`，注入到 `AgentState.last_task_plan_meta`
+> 4. supervisor 规划阶段（`_planning_phase`）的 prompt 拼接上一轮被中断的 task_plan：「✓ step 1 已完成 / ✗ step 2 用户中断」+ 明确指示「**已完成的别再做、被中断的如果用户说继续就重新规划**」
+> 5. LLM 看到上下文 + 用户的"继续" → 自动生成只包含被中断 step 的新 plan → 重做 step 2，工具重跑、LLM 重新总结，正常出自然语言回复
+>
+> **第二版踩的三个真实坑**（这次是讲技术细节）：
+>
+> - **坑 1：onInterrupt 三处副本漏改一处**。前端 store 的 `sendMessageStream`、`_smartResume`（已删）、`resumeApproval` 三个流程各有一个 onInterrupt 回调。第一版做 cancelled / tool_approval 分流时我只改了前两个，**漏了 resumeApproval**。结果场景：用户先点工具审批批准 → 进入 resumeApproval 流程 → step 2 跑工具时点停止 → cancelled 事件被错误塞进 `pendingApproval`，界面又弹一个'批准/拒绝'卡片，但内容是"已暂停..."。这种 bug 唯一防御是**重复逻辑要么提取成单一函数（最佳），要么改动时 grep 全文确保所有副本都改到**。
+>
+> - **坑 2：跨多层 contract 的 schema 校验**。第一版给 `ChatResumeRequest.action` 加了 `continue` pattern + 新增 `user_message` 字段，但 schema/api/service/store/前端 type 一共 5 层都要同步改，我漏了 schema 层 → 前端发 `action='continue'` 直接 422 校验失败。这件事让我意识到**改一个跨层 contract 需要个 checklist**：DB 模型 / Alembic migration / Pydantic schema / FastAPI endpoint / Service / TypeScript type / Frontend store / API client 必须全链路对齐。
+>
+> - **坑 3：tool_agent 工具跑完但 LLM 还没总结时被取消，导致续跑后'(无输出)'**。tool_agent 的多轮循环里 turn=0 跑工具、turn=1 才让 LLM 基于工具结果做总结输出（这一步赋值 final_answer）。如果用户**正好在 turn=0 和 turn=1 之间**点停止，final_answer 还是空字符串。第一版我在 supervisor `_finish_done` 加了兜底（按 skill > tool 优先级从 tool_calls 取最近 result），让用户看到完整调研报告。**但这恰好就是第一版被用户挑战的'复用半成品'设计——兜底虽然能让用户看到内容，但本质上还是把'中断状态的中间结果'当成了'最终答案'**。第二版改成"取消即终止"后这个坑反而**不用兜底了**，因为下一轮会重做这个 step，LLM 会正常完成总结。
+>
+> **第二版的效果**：用户点停止 → 界面恢复输入状态、无任何卡片提示；输入"继续" → 后端新一轮 supervisor 看到上轮 meta、LLM 决定只重跑 step 2 → 重新调 research_assistant、重新出报告，**自然语言、有结构、有参考链接**，不会再有"(无输出)"或"Successfully wrote to ..."这种非用户友好的输出。重跑会多花 1-10 秒时间，但**心智一致**——用户不会再有任何疑惑。"
+
+**这道题的核心价值（接 Q51）**：
+- 展示**产品思维 + 自我反思能力**：不是炫"我做了什么炫酷功能"，而是讲"我做错了、用户挑战了、我反思了、我推翻重做了"——**面试官最爱这种诚实的复盘**
+- 展示**对主流方案的调研能力**：调研了 Cursor / OpenAI Assistants / Claude 怎么做，发现自己跑偏了
+- 展示**对工程 vs 产品的区分**：第一版工程上完美，但产品上错的——这种判断力比纯技术能力更稀缺
+- 展示**重构勇气**：发现问题愿意推翻 100+ 行代码重写，不沉没成本
+- **三个坑层次递进**：前端代码组织 → 跨层 contract → 节点级时序，覆盖前后端联调全栈，但**用第二版的视角重新看坑 3**（"兜底反而印证了第一版设计错"）展示了反思的深度
+
+**追问预案**：
+- *Q：为什么不用 abort + 杀线程让 step 2 立刻停下来？*
+  → "abort fetch 会让 SSE 断开、前后端状态机错位；杀线程会让 Postgres 连接、MCP stdio 进程、HTTP 状态变脏。**业界没人这么做**。改成协作式 cancel（cancel_flag 标记 + 节点轮询）之后，已经发出的工具 call 必须等它返回（无法中途打断 fetch），**但不会进入下一轮工具调用、不会派发下一个 step**——这是'优雅停机'的物理边界。"
+- *Q：用户重跑 step 2 不浪费 token / API 调用吗？*
+  → "确实会重跑，但**这正是用户心智一致的代价**。如果想优化可以做'工具结果缓存复用'——把上一轮已经跑过的 tool_calls 也存到 task_plan_meta 里，下一轮 supervisor 派发 step 时通过 step_contexts 把工具结果注入，LLM 跳过工具调用直接总结。但这就退化回'复用半成品'了。**我选了语义清晰**而不是'秒出但语义混乱'。这是 trade-off，不是技术问题。"
+- *Q：LLM 怎么知道'继续'是要做被中断的 step 而不是接着原 plan 派发？*
+  → "supervisor 规划阶段的 prompt 里直接告诉 LLM 上一轮 task_plan 的完整状态（用 ✓ / ✗ 标记），并明确指示：'**已完成的 step 不要再做；被中断的 step 如果用户当前消息是续跑意图，必须重新规划**'。temperature 设 0.1，规则非常具体。降级策略是 JSON 解析失败时直接结束本轮，让用户重发更明确的消息。"
+- *Q：thread_id 还需要吗？checkpoint 机制还在用吗？*
+  → "都在保留，但**职责变了**。LangGraph 的 PostgresSaver checkpoint 现在**只为 Q51 的工具审批服务**——审批是真正的 HITL，需要 graph 暂停 + Command(resume) 续跑。用户主动取消不再用 checkpoint。thread_id 还是 `turn-{user_msg_id}`，每条用户消息一个 thread，单轮内部支持工具审批 resume，跨轮通过 `task_plan_meta` 持久化连接——**两套机制各司其职，语义清晰**。"
+- *Q：为什么不把 task_plan 直接拼到 assistant message content 里，要单独加 JSON 列？*
+  → "我评估过三种方式：(1) 自然语言拼 content（'已完成 step 1 ✓ / 中断 step 2 ✗'）——零表结构改动但**LLM 理解依赖自然语言描述、不够稳**；(2) 复用现有 `tool_calls_json` 字段塞 task_plan——语义不清；(3) **新加 `task_plan_meta` JSONB 列**——结构化、不污染 content、未来还能基于 task_plan 做别的（比如统计任务完成率）。选了 (3)，加列只是一次 alembic migration 的代价，长期可维护性最好。"
+- *Q：第一版被推翻后，原来的代码删了多少？*
+  → "后端拆了 supervisor 的 cancel-interrupt 路径（约 60 行）、chat_service 里 user_message 写入逻辑（约 20 行）、schema/api/state 类型字段；前端删除了整个 `_smartResume` 函数（120 行）、`interruptedUserMsgId` 状态、三处 onInterrupt 的 cancelled 分流。**净减少 200+ 行代码**——第二版的实现复杂度只有第一版的三分之一。这印证了一个朴素的真理：**产品上对的方案，工程上往往也更简洁**。"
