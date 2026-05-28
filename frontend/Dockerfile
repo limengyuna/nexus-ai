@@ -28,7 +28,13 @@ FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # 自定义 nginx 配置：SPA fallback + /api 反代到 backend
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 放到 templates 目录让 nginx:alpine 启动时自动跑 envsubst 替换 ${BACKEND_URL} 等变量
+# 见 https://hub.docker.com/_/nginx 的 "Using environment variables in nginx configuration"
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# 默认后端地址（本地 docker-compose 用），Railway 部署时通过 service Variables 覆盖为
+# http://nexus-ai.railway.internal:8002
+ENV BACKEND_URL=http://backend:8000
 
 EXPOSE 80
 

@@ -28,6 +28,7 @@ COPY . .
 # 暴露端口（与 APP_PORT 一致）
 EXPOSE 8002
 
-# 默认启动命令：先跑数据库迁移再启动 FastAPI
-# 用 sh -c 串联两条命令；docker-compose 中会被 command 覆盖以分别启动 backend / celery worker
-CMD ["sh", "-c", "alembic upgrade head && python main.py"]
+# 默认启动命令：先跑数据库迁移 → 后台启动 Celery Worker → 前台启动 FastAPI
+# 单 service 同时跑两个进程的策略，适用于 Railway 等不支持多 service 共享 Volume 的平台
+# docker-compose 中会被 command 覆盖以分别启动 backend / celery worker（两个容器共享 volume）
+CMD ["sh", "-c", "alembic upgrade head && celery -A app.tasks.celery_app worker --loglevel=info --pool=solo & python main.py"]
