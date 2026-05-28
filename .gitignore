@@ -62,7 +62,7 @@ frontend/.vite/
 # ---------- Alembic（迁移文件保留，缓存忽略）----------
 backend/alembic/__pycache__/
 
-docs/agent-tuning/
+docs/
 jl.md
 lang.txt
 plan.md

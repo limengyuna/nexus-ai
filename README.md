@@ -2,16 +2,27 @@
 
 # 🧠 NexusAI
 
-**企业级智能知识库 + 多 Agent 协作平台**
+**LangGraph 多 Agent · RAG · MCP 协议 · 企业级 AI 中台**
 
-把私有知识、多步推理、外部工具、MCP 协议串成一个**可观测、可控、可扩展**的 AI 中台
+把私有知识、多步推理、外部工具、MCP 协议串成一个 **可观测、可控、可扩展** 的 AI 平台
+
+<!-- 状态徽章（Live Demo / CI / Coverage 上线后替换占位 URL）-->
+[![Live Demo](https://img.shields.io/badge/Live_Demo-即将上线-success?logo=vercel)](#-live-demo--功能截图)
+[![CI](https://img.shields.io/badge/CI-即将接入-blue?logo=githubactions)](#)
+[![Coverage](https://img.shields.io/badge/coverage-即将接入-yellow)](#)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42b883?logo=vuedotjs)](https://vuejs.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2-orange)](https://github.com/langchain-ai/langgraph)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-0.5-purple)](https://www.trychroma.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+🎬 **[在线体验 →](#-live-demo--功能截图)** &nbsp;·&nbsp; 🏗️ **[系统架构 →](#️-系统架构)** &nbsp;·&nbsp; 🚀 **[5 秒启动 →](#-一键启动推荐)**
+
+---
+
+🏆 **30+ REST API · 5 Skills · 4 Tools · 3 种分块策略 · MCP 双向集成 · ~9,500 行代码 · 全 Docker 部署**
 
 </div>
 
@@ -140,6 +151,24 @@ graph TB
     RAG_AGENT & FALLBACK & S1 & S2 & S3 & S4 & S5 --> DS
     API <-->|stdio/SSE| MCP_EXT
 ```
+
+---
+
+## 🎬 Live Demo & 功能截图
+
+> **在线体验**：即将部署到 Railway · [点这里访问](#)（部署完成后替换链接）
+>
+> **演示账号**：`demo` / `demo123` （已预填示例知识库，无需上传文档即可体验）
+
+| 智能对话（SSE 流式 + 思考过程） | Skills 测试执行 |
+|:---:|:---:|
+| ![chat](./assets/screenshots/chat.png) | ![skills](./assets/screenshots/skills.png) |
+
+| 知识库管理 + 分块策略 | 暗色模式 |
+|:---:|:---:|
+| ![kb](./assets/screenshots/knowledge.png) | ![dark](./assets/screenshots/dark.png) |
+
+> 截图请放在仓库根的 `assets/screenshots/` 目录下（该目录会推送到 GitHub）。
 
 ---
 
@@ -287,6 +316,21 @@ npm run dev
 
 ---
 
+## 📊 RAG 质量保证（评测体系）
+
+> 即将上线 · 30 条人工标注测试集 + Ragas 量化指标
+
+| 指标 | 含义 | 当前值 |
+|------|------|:---:|
+| **Faithfulness** | 答案是否忠实于检索资料（不编造）| 待补充 |
+| **Answer Relevancy** | 答案是否切题 | 待补充 |
+| **Context Precision** | 检索到的资料是否相关 | 待补充 |
+| **Context Recall** | 应该检索到的资料是否都召回了 | 待补充 |
+
+评测脚本：`scripts/eval_rag.py`（待加入）· 测试集：`tests/eval_dataset.jsonl`（待加入）
+
+---
+
 ## 🧠 Skills 编排示例（明星功能）
 
 `document_summarizer` 的工作流：
@@ -302,26 +346,6 @@ npm run dev
 ```
 
 **共 5 次链路调用**，前端 SkillsView 可一键测试，能看到完整 trace。
-
----
-
-## 📸 截图
-
-> 把你的实际截图放在 `docs/screenshots/` 目录下，并替换下面的路径
-
-| 智能对话（含流式 + 思考过程） | Skills 管理 |
-|:---:|:---:|
-| ![chat](./docs/screenshots/chat.png) | ![skills](./docs/screenshots/skills.png) |
-
-| 知识库管理 | 暗色模式 |
-|:---:|:---:|
-| ![kb](./docs/screenshots/knowledge.png) | ![dark](./docs/screenshots/dark.png) |
-
----
-
-## 📖 设计文档
-
-完整的规划与决策记录见 [`plan.md`](./plan.md)。
 
 ---
 
