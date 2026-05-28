@@ -15,15 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
-# 设置 pip 源
-# 本地构建用清华源加速；云端构建（Railway/海外）用官方源避免被墙
-# 通过 PIP_INDEX_URL 环境变量在构建时覆盖（docker build --build-arg 或 Railway 默认）
-ARG PIP_INDEX_URL=https://pypi.org/simple
-RUN pip config set global.index-url ${PIP_INDEX_URL}
-
 # ---------- 依赖层（独立缓存）----------
+# 升级 pip 避免老版本解析依赖陷入死循环（ResolutionTooDeep）
+# pip install 显式指定 pypi.org，避免被任何缓存的 pip 配置影响
+RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --index-url https://pypi.org/simple -r requirements.txt
 
 # ---------- 应用代码 ----------
 COPY . .
