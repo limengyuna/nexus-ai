@@ -65,4 +65,5 @@ backend/alembic/__pycache__/
 docs/agent-tuning/
 jl.md
 lang.txt
+plan.md
 
