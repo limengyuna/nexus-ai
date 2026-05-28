@@ -99,20 +99,43 @@ class BaseVectorStore(ABC):
         raise NotImplementedError
 
 
-# ---------- ChromaDB HTTP 实现 ----------
+# ---------- ChromaDB 实现（双模式：HTTP / 嵌入式）----------
 class ChromaVectorStore(BaseVectorStore):
     """
-    基于 ChromaDB HTTP Client 的实现
+    基于 ChromaDB 的向量存储实现，支持两种运行模式：
 
-    连接到 docker 中运行的 chroma server，避免 Windows 上原生编译问题。
+    1. **HTTP 模式**（本地 docker-compose 开发用）：连接独立的 chroma 容器
+       - 传入 host + port
+    2. **嵌入式**（Railway / 单机生产部署用）：Chroma 以库形式在 backend 进程内运行
+       - 传入 persist_path，数据存储于该本地目录、无需独立 chroma 服务
+
+    两个参数二选一，persist_path 优先。
     """
 
-    def __init__(self, host: str, port: int):
+    def __init__(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        persist_path: Optional[str] = None,
+    ):
         import chromadb
 
-        # HttpClient 直接连远程 Chroma Server，不需要本地 hnswlib
-        self._client = chromadb.HttpClient(host=host, port=port)
-        logger.info("ChromaVectorStore 初始化完成 (host={}, port={})", host, port)
+        if persist_path:
+            # 嵌入式模式：数据存于本地目录，无独立 chroma 服务
+            from pathlib import Path
+            Path(persist_path).mkdir(parents=True, exist_ok=True)
+            self._client = chromadb.PersistentClient(path=persist_path)
+            self._mode = "embedded"
+            logger.info("ChromaVectorStore 初始化完成（嵌入式模式，path={}）", persist_path)
+        elif host and port:
+            # HTTP 模式：连接独立的 Chroma Server（docker-compose 本地开发）
+            self._client = chromadb.HttpClient(host=host, port=port)
+            self._mode = "http"
+            logger.info("ChromaVectorStore 初始化完成（HTTP 模式，host={}, port={}）", host, port)
+        else:
+            raise ValueError(
+                "ChromaVectorStore 初始化失败：必须提供 persist_path 或 (host, port) 二者之一"
+            )
 
     def ensure_collection(self, collection_name: str) -> None:
         # get_or_create_collection 是幂等的
@@ -407,13 +430,24 @@ _singleton_store: BaseVectorStore | None = None
 
 
 def get_vector_store() -> BaseVectorStore:
-    """获取 VectorStore 单例"""
+    """
+    获取 VectorStore 单例。
+
+    根据环境变量决定走 HTTP 模式还是嵌入式：
+    - 设置了 CHROMA_PERSIST_PATH → 嵌入式（生产/Railway）
+    - 未设置 CHROMA_PERSIST_PATH → HTTP 模式（本地开发，连 docker-compose 中的 chroma 容器）
+    """
     global _singleton_store
     if _singleton_store is None:
-        _singleton_store = ChromaVectorStore(
-            host=settings.CHROMA_HOST,
-            port=settings.CHROMA_PORT,
-        )
+        if settings.CHROMA_PERSIST_PATH:
+            _singleton_store = ChromaVectorStore(
+                persist_path=settings.CHROMA_PERSIST_PATH,
+            )
+        else:
+            _singleton_store = ChromaVectorStore(
+                host=settings.CHROMA_HOST,
+                port=settings.CHROMA_PORT,
+            )
     return _singleton_store
 
 

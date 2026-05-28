@@ -70,9 +70,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v4"
     RERANK_MODEL: str = "gte-rerank-v2"
 
-    # ---------- ChromaDB（通过 HTTP 客户端连接 Docker 中的 Chroma Server） ----------
+    # ---------- ChromaDB ----------
+    # 默认走 HTTP 模式（连接 docker-compose 中的 Chroma Server，本地开发用）
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
+    # 部署模式开关：设置此项后切换到嵌入式模式（PersistentClient），
+    # 数据存到指定文件夹，无需独立 Chroma 服务（适用于 Railway / 单机生产部署）
+    CHROMA_PERSIST_PATH: str = ""
 
     # ---------- Embedding 配置 ----------
     # 通义 text-embedding-v4 的向量维度为 1024（默认）
