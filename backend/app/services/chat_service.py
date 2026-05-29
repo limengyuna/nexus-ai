@@ -198,6 +198,31 @@ class ChatService:
             session.id, len(to_compress), len(new_summary),
         )
 
+    @staticmethod
+    def _compress_async(session_id: int) -> None:
+        """
+        异步执行摘要压缩（在独立线程中运行，避免阻塞首字响应）。
+
+        使用独立的数据库 Session，避免与主线程的 Session 冲突。
+        """
+        import threading
+
+        def _run():
+            from app.core.database import SessionLocal
+            local_db = SessionLocal()
+            try:
+                local_session = ChatService.get_session(local_db, session_id)
+                if local_session is None:
+                    return
+                ChatService._compress_if_needed(local_db, local_session)
+            except Exception as e:
+                logger.error("[Memory] 异步摘要压缩失败 session_id={}: {}", session_id, e)
+            finally:
+                local_db.close()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
     # ---------- 主流程：执行一轮对话 ----------
     @staticmethod
     def chat_once(
@@ -223,8 +248,7 @@ class ChatService:
         db.add(user_msg)
         db.commit()
 
-        # 2. 摘要压缩（在调 Agent 之前做，避免 summary 过期）
-        ChatService._compress_if_needed(db, session)
+        # 2. 刷新 session 以获取最新的 summary（异步压缩可能已更新）
         db.refresh(session)
 
         # 3. 构造 AgentState 并执行
@@ -324,6 +348,9 @@ class ChatService:
         except Exception as e:
             logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
 
+        # 异步触发摘要压缩（移到回复后执行，避免阻塞首字响应）
+        ChatService._compress_async(session.id)
+
         return assistant_msg, final_state
 
     # ---------- 流式辅助：消费 token_queue → yield SSE 事件 ----------
@@ -413,8 +440,7 @@ class ChatService:
         db.commit()
         yield ("status", {"step": "user_saved", "user_msg_id": user_msg.id})
 
-        # ---------- 2. 摘要压缩 ----------
-        ChatService._compress_if_needed(db, session)
+        # ---------- 2. 刷新 session 以获取最新 summary ----------
         db.refresh(session)
         yield ("status", {"step": "thinking"})
 
@@ -593,6 +619,9 @@ class ChatService:
             )
         except Exception as e:
             logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
+
+        # 异步触发摘要压缩（移到回复后执行，避免阻塞首字响应）
+        ChatService._compress_async(session.id)
 
         # ---------- 7. 发送 done + 完整元数据 ----------
         execution_trace = json.loads(
