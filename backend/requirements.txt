@@ -31,7 +31,7 @@ redis==5.1.0
 loguru==0.7.2                     # 美观的日志库
 
 # ---------- 阶段二：RAG 管道 ----------
-chromadb-client==0.5.23           # ChromaDB HTTP 客户端（避开 Windows 本地 C++ 编译，连接 docker 运行的 chroma server）
+chromadb==0.5.23                  # ChromaDB 向量库（Railway 生产环境嵌入式必须完整版；Windows 平台已提供预编译 wheel 无需本地编译）
 langchain-text-splitters==0.3.2   # 仅引入分块策略，不引入整个 langchain
 dashscope==1.20.11                # 阿里通义 Embedding / LLM SDK
 unstructured[pdf,pptx,docx]>=0.15.0   # 文档结构化解析（含 PDF / PPTX / DOCX 子格式支持）
