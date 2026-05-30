@@ -293,185 +293,191 @@ function onKeyDown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex h-full">
-    <!-- 第一栏：会话列表（可收折） -->
+  <div class="flex h-full bg-[#f8fafc] dark:bg-[#07080d]">
+    <!-- 第一栏：会话列表（引入毛玻璃与高感半透质感） -->
     <transition
-      enter-active-class="transition-all duration-200 ease-out"
+      enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 -translate-x-4 max-w-0"
       enter-to-class="opacity-100 translate-x-0 max-w-64"
-      leave-active-class="transition-all duration-150 ease-in"
+      leave-active-class="transition-all duration-200 ease-in"
       leave-from-class="opacity-100 translate-x-0 max-w-64"
       leave-to-class="opacity-0 -translate-x-4 max-w-0"
     >
-    <div v-if="!sidebarCollapsed" class="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0">
-      <div class="p-3 border-b border-gray-200 dark:border-gray-800 space-y-2">
-        <button
-          class="w-full py-2 px-3 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1.5"
-          title="快捷键: Ctrl+K"
-          @click="showNewSessionModal = true"
-        >
-          <Plus :size="16" :stroke-width="2.5" />
-          <span>新建对话</span>
-          <kbd class="hidden lg:inline-block ml-1 px-1.5 py-0.5 text-[10px] font-mono bg-primary-700/30 rounded">⌘K</kbd>
-        </button>
-
-        <!-- 会话搜索 -->
-        <div class="relative">
-          <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            v-model="searchKeyword"
-            type="text"
-            placeholder="搜索会话..."
-            class="w-full pl-8 pr-7 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
+      <div v-if="!sidebarCollapsed" class="w-64 bg-white/50 dark:bg-[#0c0d14]/40 backdrop-blur-md border-r border-gray-200/50 dark:border-gray-800/40 flex flex-col flex-shrink-0">
+        <div class="p-3.5 border-b border-gray-100/60 dark:border-gray-800/30 space-y-2.5">
+          <!-- 新建对话按钮 -->
           <button
-            v-if="searchKeyword"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            @click="searchKeyword = ''"
+            class="w-full py-2 px-3 bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white text-xs font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 btn-shine-effect shadow-md shadow-gray-800/5 active:scale-[0.98]"
+            title="快捷键: Ctrl+K"
+            @click="showNewSessionModal = true"
           >
-            <X :size="12" />
+            <Plus :size="14" :stroke-width="3" />
+            <span>新建对话</span>
+            <kbd class="hidden lg:inline-block ml-1 px-1.5 py-0.5 text-[9px] font-mono bg-primary-700/20 rounded font-bold">⌘K</kbd>
           </button>
-        </div>
-      </div>
 
-      <div class="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-        <!-- 初次加载骨架屏 -->
-        <SkeletonList
-          v-if="chat.sessionsLoading && chat.sessions.length === 0"
-          :rows="5"
-          item-class="h-9 w-full"
-          class="px-1"
-        />
-        <div v-else-if="chat.sessions.length === 0" class="text-center text-sm text-gray-400 py-8">
-          暂无对话<br>点击上方按钮创建
-        </div>
-        <div v-else-if="filteredSessions.length === 0" class="text-center text-sm text-gray-400 py-8">
-          没有匹配的会话
+          <!-- 会话搜索 -->
+          <div class="relative">
+            <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              v-model="searchKeyword"
+              type="text"
+              placeholder="搜索会话..."
+              class="w-full pl-8 pr-7 py-1.5 text-xs bg-white/80 dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 border border-gray-200/70 dark:border-gray-800 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            />
+            <button
+              v-if="searchKeyword"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+              @click="searchKeyword = ''"
+            >
+              <X :size="11" />
+            </button>
+          </div>
         </div>
 
-        <div
-          v-for="s in filteredSessions"
-          :key="s.id"
-          class="group flex items-center justify-between gap-1 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors"
-          :class="chat.activeSessionId === s.id
-            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-800 dark:text-primary-200'
-            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
-          @click="handleSelect(s.id)"
-          @dblclick="startRename(s.id, s.title)"
-        >
-          <!-- 重命名状态：input -->
-          <input
-            v-if="renamingSessionId === s.id"
-            v-model="renameInput"
-            :data-rename-input="s.id"
-            type="text"
-            class="flex-1 px-1.5 py-0.5 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-primary-500 rounded outline-none ring-2 ring-primary-200 dark:ring-primary-900/40"
-            @click.stop
-            @keydown.enter.prevent="saveRename"
-            @keydown.esc.prevent="cancelRename"
-            @blur="saveRename"
+        <!-- 列表滚动区 -->
+        <div class="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+          <SkeletonList
+            v-if="chat.sessionsLoading && chat.sessions.length === 0"
+            :rows="5"
+            item-class="h-9 w-full rounded-lg"
+            class="px-1"
           />
-          <!-- 普通状态：标题 + hover 操作按钮 -->
-          <template v-else>
-            <span class="truncate flex-1" :title="s.title">{{ s.title }}</span>
-            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                class="text-gray-400 hover:text-primary-600"
-                title="重命名（也可双击）"
-                @click.stop="startRename(s.id, s.title)"
-              >
-                <Pencil :size="13" />
-              </button>
-              <button
-                class="text-gray-400 hover:text-red-500"
-                title="删除会话"
-                @click.stop="handleDelete(s.id)"
-              >
-                <Trash2 :size="13" />
-              </button>
-            </div>
-          </template>
+          <div v-else-if="chat.sessions.length === 0" class="text-center text-xs text-gray-400/80 py-10 font-medium">
+            暂无对话<br>点击上方按钮创建
+          </div>
+          <div v-else-if="filteredSessions.length === 0" class="text-center text-xs text-gray-400/80 py-10 font-medium">
+            没有匹配的会话
+          </div>
+
+          <div
+            v-for="s in filteredSessions"
+            :key="s.id"
+            class="group flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl cursor-pointer text-xs font-semibold transition-all duration-200 border"
+            :class="chat.activeSessionId === s.id
+              ? 'bg-primary-500/10 dark:bg-primary-500/15 border-primary-500/20 text-primary-700 dark:text-primary-300 shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/60 dark:hover:bg-gray-800/40 border-transparent hover:text-gray-800 dark:hover:text-gray-200'"
+            @click="handleSelect(s.id)"
+            @dblclick="startRename(s.id, s.title)"
+          >
+            <!-- 重命名 -->
+            <input
+              v-if="renamingSessionId === s.id"
+              v-model="renameInput"
+              :data-rename-input="s.id"
+              type="text"
+              class="flex-1 px-2 py-0.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 border border-primary-500 rounded-lg outline-none ring-4 ring-primary-500/10"
+              @click.stop
+              @keydown.enter.prevent="saveRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="saveRename"
+            />
+            <!-- 普通显示 -->
+            <template v-else>
+              <span class="truncate flex-1" :title="s.title">{{ s.title }}</span>
+              <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  class="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                  title="重命名（双击也可）"
+                  @click.stop="startRename(s.id, s.title)"
+                >
+                  <Pencil :size="12" />
+                </button>
+                <button
+                  class="text-gray-400 hover:text-red-500 transition-colors"
+                  title="删除会话"
+                  @click.stop="handleDelete(s.id)"
+                >
+                  <Trash2 :size="12" />
+                </button>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
-    </div>
     </transition>
 
     <!-- 第二栏：消息区 -->
-    <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-950">
-      <!-- 顶部 -->
-      <div class="h-14 px-5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between flex-shrink-0">
-        <div class="flex items-center gap-2 min-w-0">
-          <!-- 侧边栏收折按钮 -->
+    <div class="flex-1 flex flex-col min-w-0 bg-[#fafcfd] dark:bg-[#08090d] transition-colors duration-200">
+      <!-- 顶栏 -->
+      <div class="h-14 px-5 bg-white/60 dark:bg-[#0c0d14]/60 backdrop-blur-md border-b border-gray-100/60 dark:border-gray-800/30 flex items-center justify-between flex-shrink-0 z-20">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <!-- 侧边栏按钮 -->
           <button
-            class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
+            class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100/80 dark:hover:bg-gray-800/40 transition-all flex-shrink-0 active:scale-95"
             :title="sidebarCollapsed ? '展开会话列表' : '收起会话列表'"
             @click="sidebarCollapsed = !sidebarCollapsed"
           >
-            <PanelLeftOpen v-if="sidebarCollapsed" :size="18" :stroke-width="2" />
-            <PanelLeftClose v-else :size="18" :stroke-width="2" />
+            <PanelLeftOpen v-if="sidebarCollapsed" :size="16" :stroke-width="2.5" />
+            <PanelLeftClose v-else :size="16" :stroke-width="2.5" />
           </button>
-          <div class="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+          
+          <div class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">
             {{ chat.activeSession?.title ?? '请选择或创建一个会话' }}
           </div>
-          <div v-if="activeKbName" class="text-xs text-blue-600 dark:text-blue-400 mt-0.5 flex items-center gap-1">
-            <Library :size="12" :stroke-width="2" />
-            <span>关联知识库：{{ activeKbName }}</span>
+          
+          <div v-if="activeKbName" class="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/10 flex items-center gap-1 font-semibold">
+            <Library :size="10" :stroke-width="2.5" />
+            <span>知识库：{{ activeKbName }}</span>
           </div>
         </div>
+
         <div class="flex items-center gap-2">
           <!-- 对话摘要按钮 -->
           <button
             v-if="chat.activeSession?.summary"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+            class="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
             :class="showSummary
-              ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+              ? 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'
+              : 'bg-white dark:bg-gray-900 border-gray-200/50 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'"
             title="查看 AI 对当前对话的理解摘要"
             @click="showSummary = !showSummary"
           >
-            <FileText :size="14" :stroke-width="2" />
+            <FileText :size="12" :stroke-width="2.5" />
             <span>对话摘要</span>
-            <ChevronDown :size="14" class="transition-transform" :class="showSummary ? 'rotate-180' : ''" />
+            <ChevronDown :size="12" class="transition-transform duration-200" :class="showSummary ? 'rotate-180' : ''" />
           </button>
-        <button
-          class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
-          :class="showThinking
-            ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-100 dark:hover:bg-primary-900/50'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
-          :title="showThinking ? '隐藏思考过程' : '查看 Agent 完整推理链路'"
-          @click="showThinking = !showThinking"
-        >
-          <Sparkles :size="14" :stroke-width="2" />
-          <span>思考过程</span>
-          <component :is="showThinking ? ChevronRight : ChevronLeft" :size="14" class="text-gray-400" />
-        </button>
+          
+          <!-- 思考过程按钮 -->
+          <button
+            class="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
+            :class="showThinking
+              ? 'bg-primary-500/10 border-primary-500/20 text-primary-700 dark:text-primary-400 hover:bg-primary-500/20'
+              : 'bg-white dark:bg-gray-900 border-gray-200/50 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'"
+            :title="showThinking ? '隐藏思考过程' : '查看 Agent 完整推理链路'"
+            @click="showThinking = !showThinking"
+          >
+            <Sparkles :size="12" :stroke-width="2.5" />
+            <span>思考过程</span>
+            <component :is="showThinking ? ChevronRight : ChevronLeft" :size="12" class="text-gray-400" />
+          </button>
         </div>
       </div>
 
-      <!-- 对话摘要面板（可折叠） -->
+      <!-- 对话摘要面板 -->
       <transition
-        enter-active-class="transition-all duration-200 ease-out"
+        enter-active-class="transition-all duration-300 ease-out"
         enter-from-class="opacity-0 -translate-y-2 max-h-0"
         enter-to-class="opacity-100 translate-y-0 max-h-60"
-        leave-active-class="transition-all duration-150 ease-in"
+        leave-active-class="transition-all duration-200 ease-in"
         leave-from-class="opacity-100 translate-y-0 max-h-60"
         leave-to-class="opacity-0 -translate-y-2 max-h-0"
       >
         <div
           v-if="showSummary && chat.activeSession?.summary"
-          class="px-5 py-3 bg-amber-50/60 dark:bg-amber-900/10 border-b border-amber-200/50 dark:border-amber-800/30 overflow-hidden"
+          class="px-5 py-3.5 bg-amber-500/5 dark:bg-amber-500/5 border-b border-amber-200/40 dark:border-amber-900/20 overflow-hidden"
         >
-          <div class="flex items-start gap-2">
-            <FileText :size="14" class="text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-            <div class="min-w-0">
-              <div class="text-[10px] font-medium text-amber-600/70 dark:text-amber-400/70 uppercase tracking-wider mb-1">AI 对话记忆</div>
-              <p class="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{{ chat.activeSession.summary }}</p>
-              <div class="mt-2 flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
-                <span>创建：{{ formatLocalTime(chat.activeSession.created_at) }}</span>
-                <span>更新：{{ formatLocalTime(chat.activeSession.updated_at) }}</span>
-                <span v-if="sessionTotalTokens > 0" class="flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-                  <Zap :size="10" />
-                  累计 {{ formatTokens(sessionTotalTokens) }} tokens
+          <div class="flex items-start gap-2.5">
+            <FileText :size="13" class="text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+            <div class="min-w-0 flex-1">
+              <div class="text-[9px] font-bold text-amber-600/80 dark:text-amber-400/80 uppercase tracking-widest mb-1 font-outfit">AI MEMORY KEYWORDS</div>
+              <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{{ chat.activeSession.summary }}</p>
+              <div class="mt-2.5 flex items-center gap-3 text-[9px] text-gray-400 dark:text-gray-500 font-medium">
+                <span>创建时间：{{ formatLocalTime(chat.activeSession.created_at) }}</span>
+                <span>更新时间：{{ formatLocalTime(chat.activeSession.updated_at) }}</span>
+                <span v-if="sessionTotalTokens > 0" class="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded">
+                  <Zap :size="9" />
+                  累计吞吐 {{ formatTokens(sessionTotalTokens) }} tokens
                 </span>
               </div>
             </div>
@@ -479,20 +485,23 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </transition>
 
-      <!-- 消息流（relative 容器供"滚到底部"按钮定位） -->
+      <!-- 消息列表滚动区 -->
       <div class="flex-1 relative overflow-hidden">
         <div
           ref="messagesRef"
-          class="absolute inset-0 overflow-y-auto px-6 py-6 space-y-4"
+          class="absolute inset-0 overflow-y-auto px-6 py-6 space-y-5"
           @scroll="handleScroll"
         >
-          <div v-if="!chat.activeSessionId" class="h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
-            请选择或创建一个会话开始对话
+          <div v-if="!chat.activeSessionId" class="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 font-medium text-xs space-y-2">
+            <MessageSquare :size="24" class="text-gray-300 dark:text-gray-700 animate-pulse" />
+            <span>请选择或创建一个会话开始对话</span>
           </div>
           <template v-else>
-            <div v-if="chat.messages.length === 0" class="text-center text-sm text-gray-400 dark:text-gray-500 py-12">
-              还没有消息，说点什么吧
+            <div v-if="chat.messages.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 font-medium text-xs space-y-2 py-12">
+              <Sparkles :size="20" class="text-gray-300 dark:text-gray-700" />
+              <span>还没有消息，向 NexusAI 智能体提问吧</span>
             </div>
+            
             <MessageBubble
               v-for="(m, idx) in chat.messages"
               :key="m.id"
@@ -500,16 +509,18 @@ function onKeyDown(e: KeyboardEvent) {
               :is-last-assistant="m.role === 'assistant' && idx === chat.messages.length - 1 && !chat.sending"
               @regenerate="regenerateLastAnswer"
             />
+            
+            <!-- Agent 正在思考中的流光呼吸效果 -->
             <div v-if="chat.sending && !chat.messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
-              <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-gray-500 dark:text-gray-400 inline-flex items-center gap-3">
+              <div class="bg-white/80 dark:bg-gray-900/60 backdrop-blur-md border border-gray-100 dark:border-gray-800 rounded-2xl rounded-bl-md px-4 py-3 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-3 shadow-sm obsidian-glow">
                 <span class="inline-flex gap-1">
-                  <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0s"></span>
-                  <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
-                  <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0s"></span>
+                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
                 </span>
-                <span>Agent 正在思考...</span>
+                <span class="font-semibold">智能体正在思考多步协作方案...</span>
                 <button
-                  class="text-xs px-2 py-0.5 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+                  class="text-[10px] px-2 py-0.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-bold active:scale-95"
                   title="停止生成"
                   @click="chat.stopGenerating()"
                 >停止</button>
@@ -518,7 +529,7 @@ function onKeyDown(e: KeyboardEvent) {
           </template>
         </div>
 
-        <!-- 滚到底部浮动按钮（仅当用户向上滚动时显示） -->
+        <!-- 滚到底部悬浮按钮 -->
         <transition
           enter-active-class="transition-all duration-200 ease-out"
           enter-from-class="opacity-0 translate-y-2"
@@ -529,16 +540,16 @@ function onKeyDown(e: KeyboardEvent) {
         >
           <button
             v-if="showScrollToBottom"
-            class="absolute bottom-4 left-1/2 -translate-x-1/2 w-10 h-10 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors z-10"
+            class="absolute bottom-4 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 border border-gray-200/60 dark:border-gray-700/60 shadow-lg flex items-center justify-center text-gray-500 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50/50 dark:hover:bg-primary-950/40 transition-all active:scale-90 z-10 backdrop-blur-md"
             title="滚到最新消息"
             @click="scrollToBottom"
           >
-            <ArrowDown :size="18" :stroke-width="2" />
+            <ArrowDown :size="16" :stroke-width="2.5" />
           </button>
         </transition>
       </div>
 
-      <!-- 工具审批卡片（Agent 调用危险工具被 interrupt 时显示） -->
+      <!-- 工具审批卡片 -->
       <transition
         enter-active-class="transition-all duration-300 ease-out"
         enter-from-class="opacity-0 translate-y-4"
@@ -547,92 +558,94 @@ function onKeyDown(e: KeyboardEvent) {
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 translate-y-4"
       >
-        <div v-if="chat.pendingApproval" class="mx-6 mb-3 rounded-xl border border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 shadow-lg overflow-hidden">
-          <!-- 标题栏 -->
-          <div class="flex items-center gap-2 px-4 py-3 bg-amber-100/80 dark:bg-amber-800/40 border-b border-amber-200 dark:border-amber-700">
-            <span class="text-amber-600 dark:text-amber-400 text-lg">⚠️</span>
-            <span class="text-sm font-semibold text-amber-800 dark:text-amber-200">Agent 请求执行工具</span>
-            <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-700 text-amber-700 dark:text-amber-200 font-medium">
+        <div v-if="chat.pendingApproval" class="mx-6 mb-4 rounded-2xl border border-amber-300/60 dark:border-amber-600/30 bg-amber-50/80 dark:bg-amber-950/20 backdrop-blur-md shadow-xl overflow-hidden obsidian-glow animate-pulse-subtle">
+          <!-- 标题 -->
+          <div class="flex items-center gap-2 px-4 py-3 bg-amber-100/50 dark:bg-amber-900/20 border-b border-amber-200/40 dark:border-amber-900/20">
+            <span class="text-amber-500 text-base">⚠️</span>
+            <span class="text-xs font-bold text-amber-800 dark:text-amber-300">Agent 请求执行敏感工具</span>
+            <span class="ml-auto text-[9px] px-2 py-0.5 rounded-full bg-amber-200/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 font-bold uppercase tracking-wider font-outfit">
               {{ (chat.pendingApproval.payload as any).tool_kind }}
             </span>
           </div>
           <!-- 内容 -->
-          <div class="px-4 py-3 space-y-2">
-            <div class="text-sm text-gray-700 dark:text-gray-200">
-              <span class="font-medium">{{ chat.pendingApproval.payload.message }}</span>
+          <div class="px-4 py-3 space-y-2.5">
+            <div class="text-xs font-semibold text-gray-700 dark:text-gray-200">
+              <span>{{ chat.pendingApproval.payload.message }}</span>
             </div>
-            <div class="text-xs text-gray-500 dark:text-gray-400">
-              工具名：<code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs">{{ (chat.pendingApproval.payload as any).tool_name }}</code>
+            <div class="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+              调用工具：<code class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-mono text-[9px] font-bold text-gray-700 dark:text-gray-300">{{ (chat.pendingApproval.payload as any).tool_name }}</code>
             </div>
-            <!-- 参数预览（折叠式） -->
-            <details class="text-xs">
-              <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">查看参数详情</summary>
-              <pre class="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs overflow-x-auto max-h-32 text-gray-700 dark:text-gray-300">{{ JSON.stringify((chat.pendingApproval.payload as any).arguments, null, 2) }}</pre>
+            <!-- 参数 -->
+            <details class="text-[10px] font-semibold">
+              <summary class="cursor-pointer text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">查看参数详情</summary>
+              <pre class="mt-1.5 p-2 bg-gray-100/50 dark:bg-gray-900/50 border border-gray-200/30 dark:border-gray-800/30 rounded-lg text-[9px] font-mono overflow-x-auto max-h-32 text-gray-600 dark:text-gray-400">{{ JSON.stringify((chat.pendingApproval.payload as any).arguments, null, 2) }}</pre>
             </details>
           </div>
-          <!-- 操作按钮 -->
-          <div class="flex items-center gap-3 px-4 py-3 border-t border-amber-200 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-900/20">
+          <!-- 按钮 -->
+          <div class="flex items-center gap-3 px-4 py-3 border-t border-amber-200/40 dark:border-amber-900/20 bg-amber-50/20 dark:bg-amber-900/10">
             <button
-              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors disabled:opacity-60"
+              class="flex-1 py-1.5 text-xs font-bold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-all shadow-md shadow-green-600/10 active:scale-[0.98] disabled:opacity-60"
               :disabled="chat.sending"
               @click="handleApproval('approve')"
             >
               ✓ 批准执行
             </button>
             <button
-              class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-red-100 dark:bg-red-900/40 hover:bg-red-200 dark:hover:bg-red-800/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700 transition-colors disabled:opacity-60"
+              class="flex-1 py-1.5 text-xs font-bold rounded-lg bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-200/40 dark:border-red-900/30 transition-all active:scale-[0.98] disabled:opacity-60"
               :disabled="chat.sending"
               @click="handleApproval('reject')"
             >
-              ✗ 拒绝
+              ✗ 拒绝执行
             </button>
           </div>
         </div>
       </transition>
 
-      <!-- 中断后无任何特殊 UI（Cursor 风格）：用户下次发消息时由 store 自动智能续跑 -->
-
       <!-- 错误提示 -->
-      <div v-if="errorMsg" class="px-6 py-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs flex items-center justify-between">
-        <span>{{ errorMsg }}</span>
-        <button class="text-red-600 hover:text-red-800" @click="errorMsg = ''">
-          <X :size="14" />
+      <div v-if="errorMsg" class="px-6 py-2.5 bg-red-50 dark:bg-red-950/40 border-t border-red-200/30 text-red-700 dark:text-red-400 text-[10px] font-bold flex items-center justify-between">
+        <span>错误信息：{{ errorMsg }}</span>
+        <button class="text-red-500 hover:text-red-700 transition-colors" @click="errorMsg = ''">
+          <X :size="12" />
         </button>
       </div>
 
       <!-- 输入区 -->
-      <div class="border-t border-gray-200 dark:border-gray-800 p-4 flex-shrink-0 bg-gray-50/30 dark:bg-gray-900/10">
-        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格) — 暂时隐藏 -->
-        <div v-if="false" class="flex items-center justify-between text-[11px] mb-2 text-gray-500 dark:text-gray-400 select-none px-1">
-          <div class="flex items-center gap-1.5">
+      <div class="border-t border-gray-100 dark:border-gray-800 p-4 flex-shrink-0 bg-white/40 dark:bg-gray-950/20">
+        
+        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格，重新设计并高大上外显) -->
+        <div class="flex items-center justify-between text-[10px] mb-2 text-gray-500 dark:text-gray-400 select-none px-2.5 py-1.5 bg-gray-100/50 dark:bg-gray-900/40 border border-gray-200/40 dark:border-gray-800/40 rounded-xl">
+          <div class="flex items-center gap-1.5 font-semibold">
             <Zap :size="11" class="text-amber-500 flex-shrink-0" :class="chat.sending ? 'animate-pulse' : ''" />
-            <span class="font-medium">活动上下文窗口已用：</span>
-            <span class="font-semibold" :class="currentContextTokens > 800000 ? 'text-red-500 animate-pulse' : currentContextTokens > 500000 ? 'text-amber-500 font-semibold' : 'text-primary-600 dark:text-primary-400'">
-              {{ currentContextPercent }}% ({{ formatTokens(currentContextTokens) }} / 1M)
+            <span class="font-bold tracking-wide">上下文窗口已用：</span>
+            <span class="font-bold font-mono" :class="currentContextTokens > 800000 ? 'text-red-500' : currentContextTokens > 500000 ? 'text-amber-500' : 'text-primary-600 dark:text-primary-400'">
+              {{ currentContextPercent }}% ({{ formatTokens(currentContextTokens) }} / 1.0M tokens)
             </span>
           </div>
           <!-- 极客风细条进度槽 -->
-          <div class="w-32 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden flex-shrink-0 ml-2">
+          <div class="w-24 h-1 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden flex-shrink-0 ml-2">
             <div
-              class="h-full rounded-full transition-all duration-500"
-              :class="currentContextPercent > 80 ? 'bg-red-500' : currentContextPercent > 50 ? 'bg-amber-500' : 'bg-primary-500'"
+              class="h-full rounded-full transition-all duration-500 bg-gradient-to-r"
+              :class="currentContextPercent > 80 ? 'from-red-500 to-pink-500' : currentContextPercent > 50 ? 'from-amber-500 to-orange-500' : 'from-primary-500 to-indigo-500'"
               :style="{ width: `${currentContextPercent}%` }"
             ></div>
           </div>
         </div>
-        <div class="flex gap-2">
+
+        <!-- 文本域与动作按钮 -->
+        <div class="flex gap-2.5">
           <textarea
             v-model="inputText"
             placeholder="输入消息，Enter 发送，Shift+Enter 换行"
             rows="2"
-            class="flex-1 resize-none px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            class="flex-1 resize-none px-4 py-2.5 bg-white/80 dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             :disabled="chat.sending"
             @keydown="onKeyDown"
           ></textarea>
-          <!-- 双态按钮：sending 时为"停止"，否则为"发送" -->
+          
+          <!-- 双态发送/停止按钮 -->
           <button
             v-if="!chat.sending"
-            class="px-5 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed self-end"
+            class="px-5 py-2 bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white text-xs font-bold rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed self-end btn-shine-effect shadow-md shadow-gray-800/5 active:scale-95"
             :disabled="!inputText.trim()"
             @click="handleSend"
           >
@@ -640,18 +653,18 @@ function onKeyDown(e: KeyboardEvent) {
           </button>
           <button
             v-else
-            class="px-5 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors self-end inline-flex items-center gap-1.5"
-            title="停止生成（Agent 会在最近的节点边界主动退出，已完成的进度会保留）"
+            class="px-5 py-2 bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white text-xs font-bold rounded-xl transition-all duration-200 self-end flex items-center gap-1.5 shadow-md shadow-red-500/5 active:scale-95"
+            title="停止生成（智能体将在临近步骤完成时退出）"
             @click="chat.stopGenerating()"
           >
-            <span class="w-2.5 h-2.5 bg-white rounded-sm"></span>
+            <span class="w-2 h-2 bg-white rounded-xs animate-pulse"></span>
             停止
           </button>
         </div>
       </div>
     </div>
 
-    <!-- 第三栏：思考过程（默认折叠，按钮唤起，带滑动过渡） -->
+    <!-- 第三栏：思考过程（带透光半透与平滑抽屉） -->
     <transition
       enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 translate-x-8"
@@ -660,55 +673,64 @@ function onKeyDown(e: KeyboardEvent) {
       leave-from-class="opacity-100 translate-x-0"
       leave-to-class="opacity-0 translate-x-8"
     >
-      <div v-if="showThinking" class="w-96 flex-shrink-0">
+      <div v-if="showThinking" class="w-96 flex-shrink-0 border-l border-gray-200/50 dark:border-gray-800/40 bg-white/40 dark:bg-[#0c0d14]/40 backdrop-blur-md">
         <ThinkingTrace />
       </div>
     </transition>
   </div>
 
-  <!-- 新建会话弹窗 -->
-  <div
-    v-if="showNewSessionModal"
-    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-    @click.self="showNewSessionModal = false"
+  <!-- 新建会话高感弹窗 -->
+  <transition
+    enter-active-class="transition-all duration-200 ease-out"
+    enter-from-class="opacity-0 scale-95"
+    enter-to-class="opacity-100 scale-100"
+    leave-active-class="transition-all duration-150 ease-in"
+    leave-from-class="opacity-100 scale-100"
+    leave-to-class="opacity-0 scale-95"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-96 space-y-4">
-      <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">新建对话</h3>
+    <div
+      v-if="showNewSessionModal"
+      class="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
+      @click.self="showNewSessionModal = false"
+    >
+      <div class="bg-white/95 dark:bg-[#0c0d14]/95 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl p-6 w-full max-w-sm space-y-4 obsidian-glow">
+        <h3 class="text-sm font-extrabold text-gray-800 dark:text-gray-100 font-outfit tracking-wide uppercase">新建智能对话会话</h3>
 
-      <div>
-        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">会话标题（可选）</label>
-        <input
-          v-model="newSessionTitle"
-          type="text"
-          placeholder="留空则用首条消息作为标题"
-          class="w-full px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-        />
-      </div>
+        <div>
+          <label class="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-0.5">会话标题（可选）</label>
+          <input
+            v-model="newSessionTitle"
+            type="text"
+            placeholder="留空则以首条提问为标题"
+            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
+          />
+        </div>
 
-      <div>
-        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">关联知识库（可选，启用 RAG）</label>
-        <select
-          v-model="newSessionKbId"
-          class="w-full px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-        >
-          <option :value="null">（不关联，仅闲聊/调工具）</option>
-          <option v-for="k in kb.knowledgeBases" :key="k.id" :value="k.id">
-            {{ k.name }}（{{ k.document_count }} 个文档）
-          </option>
-        </select>
-      </div>
+        <div>
+          <label class="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-0.5">关联知识库库管道（可选，启用 RAG）</label>
+          <select
+            v-model="newSessionKbId"
+            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all"
+          >
+            <option :value="null">（不关联，仅通用闲聊或协作）</option>
+            <option v-for="k in kb.knowledgeBases" :key="k.id" :value="k.id">
+              {{ k.name }}（{{ k.document_count }} 篇文档数据）
+            </option>
+          </select>
+        </div>
 
-      <div class="flex justify-end gap-2 pt-2">
-        <button class="px-4 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200" @click="showNewSessionModal = false">
-          取消
-        </button>
-        <button
-          class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-          @click="handleNewSession"
-        >
-          创建
-        </button>
+        <div class="flex justify-end gap-2.5 pt-2">
+          <button class="px-3.5 py-1.5 text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors" @click="showNewSessionModal = false">
+            取消
+          </button>
+          <button
+            class="px-4 py-1.5 text-xs font-bold bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white rounded-xl transition-all shadow-md active:scale-95"
+            @click="handleNewSession"
+          >
+            创建会话
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </transition>
 </template>
