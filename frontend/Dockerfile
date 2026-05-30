@@ -38,5 +38,8 @@ ENV BACKEND_URL=http://backend:8000
 
 EXPOSE 80
 
-# 启动时：envsubst 只替换 $BACKEND_URL → 输出到正式配置 → 启动 nginx
-CMD ["sh", "-c", "envsubst '${BACKEND_URL}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+# 启动时：
+# 1. 从 /etc/resolv.conf 提取容器实际的 DNS 解析器地址
+# 2. envsubst 替换 $BACKEND_URL 和 $DNS_RESOLVER → 输出到正式配置
+# 3. 启动 nginx
+CMD ["sh", "-c", "export DNS_RESOLVER=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}'); envsubst '${BACKEND_URL} ${DNS_RESOLVER}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
