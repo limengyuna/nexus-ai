@@ -816,7 +816,7 @@ function statusLabel(s: string): string {
       </div>
 
       <!-- 内容区 -->
-      <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+      <div class="flex-1 min-h-0 overflow-y-auto pl-5 pr-2 py-4 custom-scrollbar">
         <div v-if="chunksLoading" class="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
           <Loader2 :size="32" class="animate-spin mb-3" />
           <span class="text-sm">正在加载分块数据...</span>
@@ -895,3 +895,32 @@ function statusLabel(s: string): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 悬浮定制版高奢滚动条 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px; /* 精致窄轨道 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent; /* 滑轨完全透明，消除杂色 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.45); /* 提升清晰度的灰度半透明 */
+  border-radius: 9999px; /* 全圆角胶囊状 */
+  border: 2px solid transparent; /* 核心悬浮技巧：外加透明边框 */
+  background-clip: padding-box; /* 让滑块向内收窄，形成悬浮气垫感 */
+  transition: background-color 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.75); /* hover 自动高亮 */
+}
+
+/* 兼容 Firefox 浏览器 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.45) transparent;
+}
+</style>
