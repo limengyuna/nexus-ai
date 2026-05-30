@@ -40,6 +40,7 @@ EXPOSE 80
 
 # 启动时：
 # 1. 从 /etc/resolv.conf 提取容器实际的 DNS 解析器地址
-# 2. envsubst 替换 $BACKEND_URL 和 $DNS_RESOLVER → 输出到正式配置
-# 3. 启动 nginx
-CMD ["sh", "-c", "export DNS_RESOLVER=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}'); envsubst '${BACKEND_URL} ${DNS_RESOLVER}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+# 2. 若为 IPv6 地址（含冒号），加方括号以符合 Nginx resolver 语法
+# 3. envsubst 替换 $BACKEND_URL 和 $DNS_RESOLVER → 输出到正式配置
+# 4. 启动 nginx
+CMD ["sh", "-c", "export DNS_RESOLVER=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}'); if echo \"$DNS_RESOLVER\" | grep -q ':'; then DNS_RESOLVER=\"[$DNS_RESOLVER]\"; fi; envsubst '${BACKEND_URL} ${DNS_RESOLVER}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
