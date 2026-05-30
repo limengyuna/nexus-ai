@@ -64,19 +64,26 @@ const chunksLoading = ref(false)
 const chunksDoc = ref<DocumentItem | null>(null)
 const chunksList = ref<ChunkPreview[]>([])
 
-async function openChunksPreview(doc: DocumentItem) {
-  if (!activeKbId.value) return
-  if (doc.status !== 'completed') {
-    toast.error('该文档尚未处理完成，暂无分块可预览')
-    return
-  }
-  chunksDoc.value = doc
-  showChunksModal.value = true
+// 分页与搜索响应式状态
+const chunksLimit = ref(50)
+const chunksCurrentPage = ref(1)
+const chunksTotalCount = ref(0)
+const chunksSearchKeyword = ref('')
+
+async function loadChunksData() {
+  if (!activeKbId.value || !chunksDoc.value) return
   chunksLoading.value = true
   chunksList.value = []
+  
+  const offset = (chunksCurrentPage.value - 1) * chunksLimit.value
   try {
-    const resp = await kbApi.listDocumentChunks(activeKbId.value, doc.id)
+    const resp = await kbApi.listDocumentChunks(activeKbId.value, chunksDoc.value.id, {
+      limit: chunksLimit.value,
+      offset: offset,
+      keyword: chunksSearchKeyword.value.trim() || undefined,
+    })
     chunksList.value = resp.chunks
+    chunksTotalCount.value = resp.total
   } catch (e: any) {
     toast.error(`加载分块失败: ${e?.message ?? '未知错误'}`)
   } finally {
@@ -84,10 +91,48 @@ async function openChunksPreview(doc: DocumentItem) {
   }
 }
 
+async function openChunksPreview(doc: DocumentItem) {
+  if (!activeKbId.value) return
+  if (doc.status !== 'completed') {
+    toast.error('该文档尚未处理完成，暂无分块可预览')
+    return
+  }
+  
+  // 初始化预览状态
+  chunksDoc.value = doc
+  chunksCurrentPage.value = 1
+  chunksSearchKeyword.value = ''
+  chunksTotalCount.value = 0
+  showChunksModal.value = true
+  
+  await loadChunksData()
+}
+
 function closeChunksPreview() {
   showChunksModal.value = false
   chunksDoc.value = null
   chunksList.value = []
+  chunksSearchKeyword.value = ''
+  chunksCurrentPage.value = 1
+  chunksTotalCount.value = 0
+}
+
+async function changeChunkPage(page: number) {
+  const totalPages = Math.ceil(chunksTotalCount.value / chunksLimit.value)
+  if (page < 1 || page > totalPages || chunksLoading.value) return
+  chunksCurrentPage.value = page
+  await loadChunksData()
+}
+
+async function handleChunkSearch() {
+  chunksCurrentPage.value = 1
+  await loadChunksData()
+}
+
+async function clearChunkSearch() {
+  chunksSearchKeyword.value = ''
+  chunksCurrentPage.value = 1
+  await loadChunksData()
 }
 
 function openEditModal() {
@@ -728,19 +773,40 @@ function statusLabel(s: string): string {
     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
     @click.self="closeChunksPreview"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
       <!-- 头部 -->
-      <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between gap-3">
+      <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
         <div class="min-w-0 flex-1">
           <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <FileText :size="16" class="text-primary-600 flex-shrink-0" />
-            <span class="truncate" :title="chunksDoc?.file_name">{{ chunksDoc?.file_name }}</span>
+            <span class="truncate max-w-[14rem] sm:max-w-[20rem]" :title="chunksDoc?.file_name">{{ chunksDoc?.file_name }}</span>
           </h3>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <span v-if="!chunksLoading">共 {{ chunksList.length }} 个分块 · 策略 {{ activeKb?.chunk_strategy }}</span>
-            <span v-else>正在加载...</span>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            <span>策略: <span class="font-medium text-gray-700 dark:text-gray-300">{{ chunksDoc?.chunk_strategy || activeKb?.chunk_strategy }}</span></span>
+            <span class="mx-1.5">·</span>
+            <span>匹配分块: <span class="font-medium text-gray-700 dark:text-gray-300">{{ chunksTotalCount }}</span></span>
           </p>
         </div>
+
+        <!-- 弹窗内部关键字过滤搜索框 -->
+        <div class="relative w-44 sm:w-56 flex-shrink-0">
+          <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            v-model="chunksSearchKeyword"
+            type="text"
+            placeholder="搜索文本分块并回车..."
+            class="w-full pl-8 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+            @keydown.enter="handleChunkSearch"
+          />
+          <button
+            v-if="chunksSearchKeyword"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+            @click="clearChunkSearch"
+          >
+            <X :size="12" />
+          </button>
+        </div>
+
         <button
           class="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors flex-shrink-0"
           @click="closeChunksPreview"
@@ -750,14 +816,14 @@ function statusLabel(s: string): string {
       </div>
 
       <!-- 内容区 -->
-      <div class="flex-1 overflow-y-auto px-5 py-4">
+      <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4">
         <div v-if="chunksLoading" class="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
           <Loader2 :size="32" class="animate-spin mb-3" />
           <span class="text-sm">正在加载分块数据...</span>
         </div>
 
         <div v-else-if="chunksList.length === 0" class="text-center text-sm text-gray-400 dark:text-gray-500 py-12">
-          该文档没有分块数据
+          暂无匹配的分块数据
         </div>
 
         <div v-else class="space-y-3">
@@ -768,7 +834,7 @@ function statusLabel(s: string): string {
           >
             <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
               <span class="text-xs font-mono text-gray-600 dark:text-gray-300">
-                #{{ idx + 1 }}
+                #{{ (chunksCurrentPage - 1) * chunksLimit + idx + 1 }}
                 <span v-if="c.metadata?.header_path" class="ml-2 text-blue-600 dark:text-blue-400">
                   📑 {{ c.metadata.header_path }}
                 </span>
@@ -790,10 +856,37 @@ function statusLabel(s: string): string {
         </div>
       </div>
 
-      <!-- 底部 -->
-      <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 flex justify-end">
+      <!-- 底部毛玻璃翻页与操作栏 -->
+      <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20 backdrop-blur-md flex items-center justify-between">
+        <!-- 左侧：分页状态 -->
+        <div class="text-xs text-gray-500 dark:text-gray-400">
+          <span v-if="chunksTotalCount > 0">
+            第 <span class="font-semibold text-gray-700 dark:text-gray-200">{{ chunksCurrentPage }}</span> 页 / 共 {{ Math.ceil(chunksTotalCount / chunksLimit) }} 页 (共 {{ chunksTotalCount }} 个分块)
+          </span>
+          <span v-else-if="!chunksLoading">暂无数据</span>
+        </div>
+
+        <!-- 中间：翻页操作 -->
+        <div v-if="chunksTotalCount > chunksLimit" class="flex items-center gap-1.5">
+          <button
+            class="px-2.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-md text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+            :disabled="chunksCurrentPage === 1 || chunksLoading"
+            @click="changeChunkPage(chunksCurrentPage - 1)"
+          >
+            上一页
+          </button>
+          <button
+            class="px-2.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-md text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+            :disabled="chunksCurrentPage >= Math.ceil(chunksTotalCount / chunksLimit) || chunksLoading"
+            @click="changeChunkPage(chunksCurrentPage + 1)"
+          >
+            下一页
+          </button>
+        </div>
+
+        <!-- 右侧：关闭 -->
         <button
-          class="px-4 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+          class="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors"
           @click="closeChunksPreview"
         >
           关闭

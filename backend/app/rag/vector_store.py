@@ -89,6 +89,8 @@ class BaseVectorStore(ABC):
         collection_name: str,
         where: Dict[str, Any],
         limit: int = 1000,
+        offset: int = 0,
+        keyword: Optional[str] = None,
     ) -> List[SearchResult]:
         """按元数据过滤列出所有分块（用于文档预览）"""
         raise NotImplementedError
@@ -390,15 +392,23 @@ class ChromaVectorStore(BaseVectorStore):
         collection_name: str,
         where: Dict[str, Any],
         limit: int = 1000,
+        offset: int = 0,
+        keyword: Optional[str] = None,
     ) -> List[SearchResult]:
         try:
             collection = self._client.get_collection(name=collection_name)
         except Exception:
             return []
         # Chroma 的 collection.get 支持按 where 过滤；不需要 embedding
-        get_kwargs = {"limit": limit, "include": ["documents", "metadatas"]}
+        get_kwargs = {
+            "limit": limit,
+            "offset": offset,
+            "include": ["documents", "metadatas"],
+        }
         if where:
             get_kwargs["where"] = where
+        if keyword:
+            get_kwargs["where_document"] = {"$contains": keyword}
         raw = collection.get(**get_kwargs)
         ids = raw.get("ids") or []
         docs = raw.get("documents") or []

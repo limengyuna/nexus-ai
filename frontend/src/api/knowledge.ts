@@ -111,8 +111,12 @@ export function listDocuments(kbId: number): Promise<DocumentItem[]> {
   return request.get(`/knowledge-bases/${kbId}/documents`)
 }
 
-export function listDocumentChunks(kbId: number, documentId: number): Promise<ChunksResponse> {
-  return request.get(`/knowledge-bases/${kbId}/documents/${documentId}/chunks`)
+export function listDocumentChunks(
+  kbId: number,
+  documentId: number,
+  params?: { limit?: number; offset?: number; keyword?: string }
+): Promise<ChunksResponse> {
+  return request.get(`/knowledge-bases/${kbId}/documents/${documentId}/chunks`, { params })
 }
 
 export function reprocessDocument(kbId: number, documentId: number): Promise<TaskRecord> {

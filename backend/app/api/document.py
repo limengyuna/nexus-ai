@@ -124,7 +124,9 @@ def delete_document(
 def list_document_chunks(
     kb_id: int,
     document_id: int,
-    limit: int = 1000,
+    limit: int = 50,
+    offset: int = 0,
+    keyword: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -147,13 +149,31 @@ def list_document_chunks(
         collection_name=kb.collection_name,
         where={"document_id": document_id},
         limit=limit,
+        offset=offset,
+        keyword=keyword,
     )
+
+    # 智能总数统计：
+    # 如果有关键字，单独发起一次极轻量的获取（include=[]，仅返回 ID 用于长度计算）
+    # 如果无关键字，直接提取 Postgres 中持久化的 doc.chunk_count 即可，零向量库负担
+    if keyword:
+        try:
+            collection = vector_store._client.get_collection(name=kb.collection_name)
+            total_count = len(collection.get(
+                where={"document_id": document_id},
+                where_document={"$contains": keyword},
+                include=[]
+            ).get("ids", []))
+        except Exception:
+            total_count = 0
+    else:
+        total_count = doc.chunk_count if doc.chunk_count is not None else len(raw_chunks)
 
     return ApiResponse.ok(
         data=ChunksResponse(
             document_id=document_id,
             file_name=doc.file_name,
-            total=len(raw_chunks),
+            total=total_count,
             chunks=[
                 ChunkPreview(chunk_id=c.chunk_id, content=c.content, metadata=c.metadata)
                 for c in raw_chunks
