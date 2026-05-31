@@ -126,7 +126,7 @@ onMounted(fetchContent)
     <header class="flex items-center justify-between px-6 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
       <div class="flex items-center gap-3">
         <button
-          class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
+          class="p-2 rounded-sm hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
           @click="router.back()"
         >
           <ArrowLeft :size="20" />
@@ -134,7 +134,7 @@ onMounted(fetchContent)
         <h1 class="text-lg font-semibold text-gray-800 dark:text-gray-100">面试 QA 复盘</h1>
       </div>
       <button
-        class="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+        class="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 text-white dark:text-zinc-900 rounded-sm text-sm font-medium transition-colors disabled:opacity-50"
         :disabled="loading || !!error"
         @click="exportHtml"
       >
@@ -153,13 +153,13 @@ onMounted(fetchContent)
       <!-- 错误 -->
       <div v-else-if="error" class="text-center py-16">
         <p class="text-red-500 text-lg">{{ error }}</p>
-        <button class="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg" @click="fetchContent">重试</button>
+        <button class="mt-4 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm" @click="fetchContent">重试</button>
       </div>
 
       <!-- 预览 -->
       <article
         v-else
-        class="prose prose-sm dark:prose-invert max-w-4xl mx-auto bg-white dark:bg-gray-900 rounded-xl shadow-sm p-8"
+        class="prose prose-sm dark:prose-invert max-w-4xl mx-auto bg-white dark:bg-gray-900 rounded-md shadow-sm p-8"
         v-html="renderedHtml"
       />
     </div>

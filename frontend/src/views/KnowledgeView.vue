@@ -332,10 +332,10 @@ function fileSize(bytes: number): string {
 }
 
 function statusColor(s: string): string {
-  if (s === 'completed' || s === 'success') return 'text-green-700 bg-green-100'
-  if (s === 'failed') return 'text-red-700 bg-red-100'
-  if (s === 'pending') return 'text-gray-600 bg-gray-100'
-  return 'text-blue-700 bg-blue-100'
+  if (s === 'completed' || s === 'success') return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
+  if (s === 'failed') return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
+  if (s === 'pending') return 'text-zinc-600 bg-zinc-100 border border-zinc-200 dark:text-zinc-400 dark:bg-zinc-800 dark:border-zinc-700'
+  return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
 }
 
 function statusLabel(s: string): string {
@@ -359,7 +359,7 @@ function statusLabel(s: string): string {
     <div class="w-72 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
       <div class="p-3 border-b border-gray-200 dark:border-gray-800">
         <button
-          class="w-full py-2 px-3 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 flex items-center justify-center gap-1.5"
+          class="w-full py-2 px-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 flex items-center justify-center gap-1.5"
           @click="showCreateModal = true"
         >
           <Plus :size="16" :stroke-width="2.5" />
@@ -379,8 +379,8 @@ function statusLabel(s: string): string {
         <div
           v-for="k in kb.knowledgeBases"
           :key="k.id"
-          class="group p-3 rounded-lg cursor-pointer transition-colors"
-          :class="activeKbId === k.id ? 'bg-primary-100 dark:bg-primary-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
+          class="group p-3 rounded-sm cursor-pointer transition-colors"
+          :class="activeKbId === k.id ? 'bg-zinc-200/50 dark:bg-zinc-800/50' : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
           @click="selectKb(k.id)"
         >
           <div class="flex items-start justify-between gap-2">
@@ -416,7 +416,7 @@ function statusLabel(s: string): string {
               <p v-if="activeKb.description" class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ activeKb.description }}</p>
             </div>
             <button
-              class="text-xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 flex-shrink-0"
+              class="text-xs text-gray-500 dark:text-gray-400 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-400 transition-colors flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 flex-shrink-0"
               title="编辑名称/描述"
               @click="openEditModal"
             >
@@ -434,7 +434,7 @@ function statusLabel(s: string): string {
         <!-- 上传区 -->
         <div class="px-6 py-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
           <button
-            class="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 flex items-center gap-2"
+            class="px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 flex items-center gap-2"
             @click="triggerFileSelect"
           >
             <Upload :size="16" :stroke-width="2" />
@@ -469,7 +469,7 @@ function statusLabel(s: string): string {
               <div class="w-40 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
                   class="h-full transition-all"
-                  :class="f.status === 'failed' ? 'bg-red-500' : 'bg-primary-500'"
+                  :class="f.status === 'failed' ? 'bg-red-500' : 'bg-zinc-1000'"
                   :style="{ width: `${f.progress}%` }"
                 ></div>
               </div>
@@ -489,7 +489,7 @@ function statusLabel(s: string): string {
               v-model="docSearchKeyword"
               type="text"
               placeholder="按文件名搜索..."
-              class="w-full pl-9 pr-8 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              class="w-full pl-9 pr-8 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent"
             />
             <button
               v-if="docSearchKeyword"
@@ -529,7 +529,7 @@ function statusLabel(s: string): string {
                 <td class="py-2.5 text-right">
                   <div class="flex items-center justify-end gap-2">
                     <button
-                      class="flex items-center gap-1 text-xs text-gray-500 hover:text-primary-600 disabled:opacity-40 disabled:hover:text-gray-500 disabled:cursor-not-allowed"
+                      class="flex items-center gap-1 text-xs text-gray-500 hover:text-zinc-900 dark:text-zinc-100 disabled:opacity-40 disabled:hover:text-gray-500 disabled:cursor-not-allowed"
                       :disabled="d.status !== 'completed'"
                       :title="d.status === 'completed' ? '查看分块预览' : '文档尚未处理完成'"
                       @click="openChunksPreview(d)"
@@ -539,7 +539,7 @@ function statusLabel(s: string): string {
                     </button>
                     <button
                       v-if="d.status === 'failed' || d.status === 'completed'"
-                      class="flex items-center gap-1 text-xs text-gray-500 hover:text-primary-600"
+                      class="flex items-center gap-1 text-xs text-gray-500 hover:text-zinc-900 dark:text-zinc-100"
                       :title="d.status === 'failed' ? '上次处理失败，点击重试' : '按当前策略重新切分'"
                       @click="handleReprocessDoc(d)"
                     >
@@ -571,7 +571,7 @@ function statusLabel(s: string): string {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="showCreateModal = false"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-[28rem] space-y-3">
+    <div class="bg-white dark:bg-gray-900 rounded-md shadow-sm border border-zinc-200 dark:border-zinc-800 p-6 w-[28rem] space-y-3">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">新建知识库</h3>
 
       <div>
@@ -579,7 +579,7 @@ function statusLabel(s: string): string {
         <input
           v-model="createForm.name"
           type="text"
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         />
       </div>
 
@@ -588,7 +588,7 @@ function statusLabel(s: string): string {
         <textarea
           v-model="createForm.description"
           rows="2"
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         ></textarea>
       </div>
 
@@ -596,7 +596,7 @@ function statusLabel(s: string): string {
         <label class="block text-xs font-medium text-gray-700 mb-1">分块策略</label>
         <select
           v-model="createForm.chunk_strategy"
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900"
         >
           <option value="recursive">recursive（通用递归字符切分）</option>
           <option value="markdown">markdown（按标题层级切分，保留语义结构）</option>
@@ -605,12 +605,12 @@ function statusLabel(s: string): string {
       </div>
 
       <!-- LLM 文档清洗开关（可选预处理层） -->
-      <div class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-lg">
+      <div class="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-sm">
         <input
           id="enable-llm-clean"
           v-model="createForm.enable_llm_clean"
           type="checkbox"
-          class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          class="mt-0.5 h-4 w-4 rounded border-gray-300 text-zinc-900 dark:text-zinc-100 focus:ring-zinc-900"
         />
         <label for="enable-llm-clean" class="flex-1 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
           <span class="font-medium block mb-0.5">启用 LLM 文档清洗（实验性）</span>
@@ -624,7 +624,7 @@ function statusLabel(s: string): string {
       <div class="flex justify-end gap-2 pt-2">
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="showCreateModal = false">取消</button>
         <button
-          class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          class="px-4 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900"
           @click="handleCreate"
         >
           创建
@@ -639,7 +639,7 @@ function statusLabel(s: string): string {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="showEditModal = false"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-[28rem] space-y-3">
+    <div class="bg-white dark:bg-gray-900 rounded-md shadow-sm border border-zinc-200 dark:border-zinc-800 p-6 w-[28rem] space-y-3">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">编辑知识库</h3>
 
       <div>
@@ -647,7 +647,7 @@ function statusLabel(s: string): string {
         <input
           v-model="editForm.name"
           type="text"
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
           @keydown.enter="handleSaveEdit"
         />
       </div>
@@ -657,11 +657,11 @@ function statusLabel(s: string): string {
         <textarea
           v-model="editForm.description"
           rows="3"
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         ></textarea>
       </div>
 
-      <div class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 px-3 py-2 rounded-lg flex items-start gap-2">
+      <div class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 px-3 py-2 rounded-sm flex items-start gap-2">
         <Info :size="14" :stroke-width="2" class="flex-shrink-0 mt-0.5 text-gray-400 dark:text-gray-500" />
         <span>提示：分块策略创建后不可修改（已上传的文档不会按新策略重新切分）。如确需更换，建议新建一个知识库重新上传。</span>
       </div>
@@ -669,7 +669,7 @@ function statusLabel(s: string): string {
       <div class="flex justify-end gap-2 pt-2">
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="showEditModal = false">取消</button>
         <button
-          class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="px-4 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="!editForm.name.trim()"
           @click="handleSaveEdit"
         >
@@ -686,7 +686,7 @@ function statusLabel(s: string): string {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="cancelUploadStrategy"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-[30rem] space-y-3">
+    <div class="bg-white dark:bg-gray-900 rounded-md shadow-sm border border-zinc-200 dark:border-zinc-800 p-6 w-[30rem] space-y-3">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">选择分块策略</h3>
       <p class="text-xs text-gray-500 dark:text-gray-400">
         将为以下 <span class="font-medium text-gray-700 dark:text-gray-200">{{ pendingUploadFiles.length }}</span> 个文件统一应用分块策略。<br />
@@ -694,7 +694,7 @@ function statusLabel(s: string): string {
       </p>
 
       <!-- 文件列表（折叠展示，最多 3 行） -->
-      <div class="max-h-24 overflow-y-auto bg-gray-50 dark:bg-gray-800/60 rounded-lg p-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+      <div class="max-h-24 overflow-y-auto bg-gray-50 dark:bg-gray-800/60 rounded-sm p-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
         <div v-for="f in pendingUploadFiles" :key="f.name" class="truncate" :title="f.name">
           · {{ f.name }}
         </div>
@@ -711,14 +711,14 @@ function statusLabel(s: string): string {
             { value: 'semantic', title: 'semantic', desc: '基于 Embedding 语义跳变切分，适合无明确标题的长文本（如对话、小说），较慢' },
           ]"
           :key="opt.value"
-          class="flex items-start gap-2 p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
-          :class="{ 'border-primary-500 bg-primary-50 dark:bg-primary-900/20': pendingUploadStrategy === opt.value }"
+          class="flex items-start gap-2 p-2.5 rounded-sm border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
+          :class="{ 'border-zinc-400 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800/30': pendingUploadStrategy === opt.value }"
         >
           <input
             v-model="pendingUploadStrategy"
             type="radio"
             :value="opt.value"
-            class="mt-0.5 h-4 w-4 text-primary-600 focus:ring-primary-500"
+            class="mt-0.5 h-4 w-4 text-zinc-900 dark:text-zinc-100 focus:ring-zinc-900"
           />
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium text-gray-800 dark:text-gray-100">{{ opt.title }}</div>
@@ -741,14 +741,14 @@ function statusLabel(s: string): string {
               { value: 'off', title: '禁用' },
             ]"
             :key="opt.value"
-            class="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors text-xs"
-            :class="{ 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 font-medium text-primary-700 dark:text-primary-300': pendingUploadLlmClean === opt.value }"
+            class="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 transition-colors text-xs"
+            :class="{ 'border-zinc-400 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800/30 font-medium text-zinc-900 dark:text-zinc-100 dark:text-zinc-100': pendingUploadLlmClean === opt.value }"
           >
             <input
               v-model="pendingUploadLlmClean"
               type="radio"
               :value="opt.value"
-              class="h-3.5 w-3.5 text-primary-600 focus:ring-primary-500"
+              class="h-3.5 w-3.5 text-zinc-900 dark:text-zinc-100 focus:ring-zinc-900"
             />
             <span>{{ opt.title }}</span>
           </label>
@@ -758,7 +758,7 @@ function statusLabel(s: string): string {
       <div class="flex justify-end gap-2 pt-2">
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="cancelUploadStrategy">取消</button>
         <button
-          class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          class="px-4 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900"
           @click="confirmUploadWithStrategy"
         >
           开始上传
@@ -773,12 +773,12 @@ function statusLabel(s: string): string {
     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
     @click.self="closeChunksPreview"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="bg-white dark:bg-gray-900 rounded-md shadow-lg border border-zinc-200 dark:border-zinc-800 w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
       <!-- 头部 -->
       <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
         <div class="min-w-0 flex-1">
           <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-            <FileText :size="16" class="text-primary-600 flex-shrink-0" />
+            <FileText :size="16" class="text-zinc-900 dark:text-zinc-100 flex-shrink-0" />
             <span class="truncate max-w-[14rem] sm:max-w-[20rem]" :title="chunksDoc?.file_name">{{ chunksDoc?.file_name }}</span>
           </h3>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -795,7 +795,7 @@ function statusLabel(s: string): string {
             v-model="chunksSearchKeyword"
             type="text"
             placeholder="搜索文本分块并回车..."
-            class="w-full pl-8 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+            class="w-full pl-8 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-all"
             @keydown.enter="handleChunkSearch"
           />
           <button
@@ -830,7 +830,7 @@ function statusLabel(s: string): string {
           <div
             v-for="(c, idx) in chunksList"
             :key="c.chunk_id"
-            class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden hover:border-primary-300 dark:hover:border-primary-700 transition-colors"
+            class="border border-gray-200 dark:border-gray-700 rounded-sm overflow-hidden hover:border-primary-300 dark:hover:border-primary-700 transition-colors"
           >
             <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
               <span class="text-xs font-mono text-gray-600 dark:text-gray-300">
@@ -857,7 +857,7 @@ function statusLabel(s: string): string {
       </div>
 
       <!-- 底部毛玻璃翻页与操作栏 -->
-      <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20 backdrop-blur-md flex items-center justify-between">
+      <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20 bg-white dark:bg-zinc-950 flex items-center justify-between">
         <!-- 左侧：分页状态 -->
         <div class="text-xs text-gray-500 dark:text-gray-400">
           <span v-if="chunksTotalCount > 0">
@@ -886,7 +886,7 @@ function statusLabel(s: string): string {
 
         <!-- 右侧：关闭 -->
         <button
-          class="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors"
+          class="px-4 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium rounded-sm transition-colors"
           @click="closeChunksPreview"
         >
           关闭

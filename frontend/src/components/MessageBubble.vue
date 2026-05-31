@@ -107,10 +107,10 @@ const shortTime = computed(() => {
 
       <!-- 气泡内容 -->
       <div
-        class="rounded-2xl px-4 py-3 shadow-sm break-words"
+        class="rounded-md px-4 py-3 shadow-sm break-words"
         :class="isUser
-          ? 'bg-primary-600 text-white rounded-br-md'
-          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-md'"
+          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm'
+          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'"
       >
         <div v-if="isUser" class="whitespace-pre-wrap">{{ message.content }}</div>
         <div v-else class="markdown-body" v-html="renderedHtml"></div>
@@ -136,9 +136,9 @@ const shortTime = computed(() => {
           v-if="!isUser && isThinkingActive && chatStore.lastFaithfulness && chatStore.lastFaithfulness.score >= 0"
           class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
           :class="{
-            'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300': chatStore.lastFaithfulness.score >= 0.8,
-            'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300': chatStore.lastFaithfulness.score >= 0.5 && chatStore.lastFaithfulness.score < 0.8,
-            'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300': chatStore.lastFaithfulness.score < 0.5,
+            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score >= 0.8,
+            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score >= 0.5 && chatStore.lastFaithfulness.score < 0.8,
+            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score < 0.5,
           }"
           :title="`忠实度: ${Math.round(chatStore.lastFaithfulness.score * 100)}% (${chatStore.lastFaithfulness.supported_claims}/${chatStore.lastFaithfulness.total_claims} 条声明有据可查)`"
         >
@@ -152,8 +152,8 @@ const shortTime = computed(() => {
           @click="viewTraceOfThisMessage"
           class="flex items-center gap-1 transition-all rounded px-1.5 py-0.5 cursor-pointer text-xs"
           :class="isThinkingActive
-            ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/40 font-semibold border border-primary-200 dark:border-primary-800'
-            : 'text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
+            ? 'text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800 font-semibold border border-zinc-300 dark:border-zinc-700'
+            : 'text-gray-400 dark:text-gray-500 hover:text-zinc-900 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
           title="点击在右侧面板查看本条消息的完整思考与工具调用链路"
         >
           <Sparkles :size="10" :class="isThinkingActive ? 'animate-pulse text-primary-500' : ''" />
@@ -207,15 +207,15 @@ const shortTime = computed(() => {
   padding: 0.1em 0.4em;
   border-radius: 4px;
   font-size: 0.9em;
-  color: rgb(67 56 202);
+  color: #18181b;
 }
 /* 暗色模式下行内 code / link / blockquote 颜色微调 */
 :global(html.dark) .markdown-body :deep(code:not(pre code)) {
   background: rgb(55 65 81);  /* gray-700 */
-  color: rgb(165 180 252);    /* indigo-300 */
+  color: #e4e4e7;    /* indigo-300 */
 }
 :global(html.dark) .markdown-body :deep(a) {
-  color: rgb(165 180 252);
+  color: #e4e4e7;
 }
 :global(html.dark) .markdown-body :deep(blockquote) {
   border-left-color: rgb(75 85 99);
@@ -236,7 +236,7 @@ const shortTime = computed(() => {
   padding: 0;
 }
 .markdown-body :deep(a) {
-  color: rgb(79 70 229);
+  color: #27272a;
   text-decoration: underline;
 }
 .markdown-body :deep(blockquote) {

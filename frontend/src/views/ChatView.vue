@@ -293,7 +293,7 @@ function onKeyDown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex h-full bg-[#f8fafc] dark:bg-[#07080d]">
+  <div class="flex h-full bg-zinc-50 dark:bg-zinc-900">
     <!-- 第一栏：会话列表（引入毛玻璃与高感半透质感） -->
     <transition
       enter-active-class="transition-all duration-300 ease-out"
@@ -303,17 +303,17 @@ function onKeyDown(e: KeyboardEvent) {
       leave-from-class="opacity-100 translate-x-0 max-w-64"
       leave-to-class="opacity-0 -translate-x-4 max-w-0"
     >
-      <div v-if="!sidebarCollapsed" class="w-64 bg-white/50 dark:bg-[#0c0d14]/40 backdrop-blur-md border-r border-gray-200/50 dark:border-gray-800/40 flex flex-col flex-shrink-0">
+      <div v-if="!sidebarCollapsed" class="w-64 bg-white dark:bg-zinc-950 bg-white dark:bg-zinc-950 border-r border-gray-200/50 dark:border-gray-800/40 flex flex-col flex-shrink-0">
         <div class="p-3.5 border-b border-gray-100/60 dark:border-gray-800/30 space-y-2.5">
           <!-- 新建对话按钮 -->
           <button
-            class="w-full py-2 px-3 bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white text-xs font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 btn-shine-effect shadow-md shadow-gray-800/5 active:scale-[0.98]"
+            class="w-full py-2 px-3 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-white dark:text-zinc-900 text-xs font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-1.5  shadow-sm active:scale-[0.98]"
             title="快捷键: Ctrl+K"
             @click="showNewSessionModal = true"
           >
             <Plus :size="14" :stroke-width="3" />
             <span>新建对话</span>
-            <kbd class="hidden lg:inline-block ml-1 px-1.5 py-0.5 text-[9px] font-mono bg-primary-700/20 rounded font-bold">⌘K</kbd>
+            <kbd class="hidden lg:inline-block ml-1 px-1.5 py-0.5 text-[9px] font-mono bg-zinc-200 dark:bg-zinc-800 rounded font-bold">⌘K</kbd>
           </button>
 
           <!-- 会话搜索 -->
@@ -323,7 +323,7 @@ function onKeyDown(e: KeyboardEvent) {
               v-model="searchKeyword"
               type="text"
               placeholder="搜索会话..."
-              class="w-full pl-8 pr-7 py-1.5 text-xs bg-white/80 dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 border border-gray-200/70 dark:border-gray-800 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              class="w-full pl-8 pr-7 py-1.5 text-xs bg-white dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 border border-gray-200/70 dark:border-gray-800 rounded-md focus:outline-none focus:ring-4 focus:ring-zinc-900/5 focus:border-zinc-400 dark:border-zinc-600 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
             <button
               v-if="searchKeyword"
@@ -340,7 +340,7 @@ function onKeyDown(e: KeyboardEvent) {
           <SkeletonList
             v-if="chat.sessionsLoading && chat.sessions.length === 0"
             :rows="5"
-            item-class="h-9 w-full rounded-lg"
+            item-class="h-9 w-full rounded-sm"
             class="px-1"
           />
           <div v-else-if="chat.sessions.length === 0" class="text-center text-xs text-gray-400/80 py-10 font-medium">
@@ -353,9 +353,9 @@ function onKeyDown(e: KeyboardEvent) {
           <div
             v-for="s in filteredSessions"
             :key="s.id"
-            class="group flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl cursor-pointer text-xs font-semibold transition-all duration-200 border"
+            class="group flex items-center justify-between gap-1.5 px-3 py-2 rounded-md cursor-pointer text-xs font-semibold transition-all duration-200 border"
             :class="chat.activeSessionId === s.id
-              ? 'bg-primary-500/10 dark:bg-primary-500/15 border-primary-500/20 text-primary-700 dark:text-primary-300 shadow-sm'
+              ? 'bg-zinc-1000/10 dark:bg-zinc-1000/15 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/60 dark:hover:bg-gray-800/40 border-transparent hover:text-gray-800 dark:hover:text-gray-200'"
             @click="handleSelect(s.id)"
             @dblclick="startRename(s.id, s.title)"
@@ -366,7 +366,7 @@ function onKeyDown(e: KeyboardEvent) {
               v-model="renameInput"
               :data-rename-input="s.id"
               type="text"
-              class="flex-1 px-2 py-0.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 border border-primary-500 rounded-lg outline-none ring-4 ring-primary-500/10"
+              class="flex-1 px-2 py-0.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 border border-zinc-400 dark:border-zinc-600 rounded-sm outline-none ring-4 ring-primary-500/10"
               @click.stop
               @keydown.enter.prevent="saveRename"
               @keydown.esc.prevent="cancelRename"
@@ -377,7 +377,7 @@ function onKeyDown(e: KeyboardEvent) {
               <span class="truncate flex-1" :title="s.title">{{ s.title }}</span>
               <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
-                  class="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                  class="text-gray-400 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-400 transition-colors"
                   title="重命名（双击也可）"
                   @click.stop="startRename(s.id, s.title)"
                 >
@@ -398,13 +398,13 @@ function onKeyDown(e: KeyboardEvent) {
     </transition>
 
     <!-- 第二栏：消息区 -->
-    <div class="flex-1 flex flex-col min-w-0 bg-[#fafcfd] dark:bg-[#08090d] transition-colors duration-200">
+    <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-zinc-950 transition-colors duration-200">
       <!-- 顶栏 -->
-      <div class="h-14 px-5 bg-white/60 dark:bg-[#0c0d14]/60 backdrop-blur-md border-b border-gray-100/60 dark:border-gray-800/30 flex items-center justify-between flex-shrink-0 z-20">
+      <div class="h-14 px-5 bg-white dark:bg-zinc-950 bg-white dark:bg-zinc-950 border-b border-gray-100/60 dark:border-gray-800/30 flex items-center justify-between flex-shrink-0 z-20">
         <div class="flex items-center gap-2.5 min-w-0">
           <!-- 侧边栏按钮 -->
           <button
-            class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100/80 dark:hover:bg-gray-800/40 transition-all flex-shrink-0 active:scale-95"
+            class="p-1.5 rounded-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100/80 dark:hover:bg-gray-800/40 transition-all flex-shrink-0 active:scale-95"
             :title="sidebarCollapsed ? '展开会话列表' : '收起会话列表'"
             @click="sidebarCollapsed = !sidebarCollapsed"
           >
@@ -416,7 +416,7 @@ function onKeyDown(e: KeyboardEvent) {
             {{ chat.activeSession?.title ?? '请选择或创建一个会话' }}
           </div>
           
-          <div v-if="activeKbName" class="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/10 flex items-center gap-1 font-semibold">
+          <div v-if="activeKbName" class="text-[10px] bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 px-2 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700 flex items-center gap-1 font-semibold">
             <Library :size="10" :stroke-width="2.5" />
             <span>知识库：{{ activeKbName }}</span>
           </div>
@@ -426,9 +426,9 @@ function onKeyDown(e: KeyboardEvent) {
           <!-- 对话摘要按钮 -->
           <button
             v-if="chat.activeSession?.summary"
-            class="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
+            class="px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
             :class="showSummary
-              ? 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'
+              ? 'bg-zinc-100 border-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700'
               : 'bg-white dark:bg-gray-900 border-gray-200/50 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'"
             title="查看 AI 对当前对话的理解摘要"
             @click="showSummary = !showSummary"
@@ -440,9 +440,9 @@ function onKeyDown(e: KeyboardEvent) {
           
           <!-- 思考过程按钮 -->
           <button
-            class="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
+            class="px-2.5 py-1.5 rounded-md text-[10px] font-bold flex items-center gap-1 transition-colors border shadow-xs"
             :class="showThinking
-              ? 'bg-primary-500/10 border-primary-500/20 text-primary-700 dark:text-primary-400 hover:bg-primary-500/20'
+              ? 'bg-zinc-1000/10 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 hover:bg-zinc-1000/20'
               : 'bg-white dark:bg-gray-900 border-gray-200/50 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'"
             :title="showThinking ? '隐藏思考过程' : '查看 Agent 完整推理链路'"
             @click="showThinking = !showThinking"
@@ -512,15 +512,15 @@ function onKeyDown(e: KeyboardEvent) {
             
             <!-- Agent 正在思考中的流光呼吸效果 -->
             <div v-if="chat.sending && !chat.messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
-              <div class="bg-white/80 dark:bg-gray-900/60 backdrop-blur-md border border-gray-100 dark:border-gray-800 rounded-2xl rounded-bl-md px-4 py-3 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-3 shadow-sm obsidian-glow">
+              <div class="bg-white dark:bg-gray-900/60 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-gray-800 rounded-md rounded-bl-md px-4 py-3 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-3 shadow-sm ">
                 <span class="inline-flex gap-1">
-                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0s"></span>
-                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
-                  <span class="w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+                  <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0s"></span>
+                  <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+                  <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
                 </span>
                 <span class="font-semibold">智能体正在思考多步协作方案...</span>
                 <button
-                  class="text-[10px] px-2 py-0.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-bold active:scale-95"
+                  class="text-[10px] px-2 py-0.5 rounded-sm border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-bold active:scale-95"
                   title="停止生成"
                   @click="chat.stopGenerating()"
                 >停止</button>
@@ -540,7 +540,7 @@ function onKeyDown(e: KeyboardEvent) {
         >
           <button
             v-if="showScrollToBottom"
-            class="absolute bottom-4 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 border border-gray-200/60 dark:border-gray-700/60 shadow-lg flex items-center justify-center text-gray-500 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50/50 dark:hover:bg-primary-950/40 transition-all active:scale-90 z-10 backdrop-blur-md"
+            class="absolute bottom-4 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 border border-gray-200/60 dark:border-gray-700/60 shadow-lg flex items-center justify-center text-gray-500 dark:text-gray-300 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-400 hover:bg-zinc-100/50 dark:hover:bg-primary-950/40 transition-all active:scale-90 z-10 bg-white dark:bg-zinc-950"
             title="滚到最新消息"
             @click="scrollToBottom"
           >
@@ -558,7 +558,7 @@ function onKeyDown(e: KeyboardEvent) {
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 translate-y-4"
       >
-        <div v-if="chat.pendingApproval" class="mx-6 mb-4 rounded-2xl border border-amber-300/60 dark:border-amber-600/30 bg-amber-50/80 dark:bg-amber-950/20 backdrop-blur-md shadow-xl overflow-hidden obsidian-glow animate-pulse-subtle">
+        <div v-if="chat.pendingApproval" class="mx-6 mb-4 rounded-md border border-amber-300/60 dark:border-amber-600/30 bg-amber-50/80 dark:bg-amber-950/20 bg-white dark:bg-zinc-950 shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden  animate-pulse-subtle">
           <!-- 标题 -->
           <div class="flex items-center gap-2 px-4 py-3 bg-amber-100/50 dark:bg-amber-900/20 border-b border-amber-200/40 dark:border-amber-900/20">
             <span class="text-amber-500 text-base">⚠️</span>
@@ -578,20 +578,20 @@ function onKeyDown(e: KeyboardEvent) {
             <!-- 参数 -->
             <details class="text-[10px] font-semibold">
               <summary class="cursor-pointer text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">查看参数详情</summary>
-              <pre class="mt-1.5 p-2 bg-gray-100/50 dark:bg-gray-900/50 border border-gray-200/30 dark:border-gray-800/30 rounded-lg text-[9px] font-mono overflow-x-auto max-h-32 text-gray-600 dark:text-gray-400">{{ JSON.stringify((chat.pendingApproval.payload as any).arguments, null, 2) }}</pre>
+              <pre class="mt-1.5 p-2 bg-gray-100/50 dark:bg-gray-900/50 border border-gray-200/30 dark:border-gray-800/30 rounded-sm text-[9px] font-mono overflow-x-auto max-h-32 text-gray-600 dark:text-gray-400">{{ JSON.stringify((chat.pendingApproval.payload as any).arguments, null, 2) }}</pre>
             </details>
           </div>
           <!-- 按钮 -->
           <div class="flex items-center gap-3 px-4 py-3 border-t border-amber-200/40 dark:border-amber-900/20 bg-amber-50/20 dark:bg-amber-900/10">
             <button
-              class="flex-1 py-1.5 text-xs font-bold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-all shadow-md shadow-green-600/10 active:scale-[0.98] disabled:opacity-60"
+              class="flex-1 py-1.5 text-xs font-bold rounded-sm bg-green-600 hover:bg-green-700 text-white dark:text-zinc-900 transition-all shadow-md shadow-green-600/10 active:scale-[0.98] disabled:opacity-60"
               :disabled="chat.sending"
               @click="handleApproval('approve')"
             >
               ✓ 批准执行
             </button>
             <button
-              class="flex-1 py-1.5 text-xs font-bold rounded-lg bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-200/40 dark:border-red-900/30 transition-all active:scale-[0.98] disabled:opacity-60"
+              class="flex-1 py-1.5 text-xs font-bold rounded-sm bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-200/40 dark:border-red-900/30 transition-all active:scale-[0.98] disabled:opacity-60"
               :disabled="chat.sending"
               @click="handleApproval('reject')"
             >
@@ -610,26 +610,9 @@ function onKeyDown(e: KeyboardEvent) {
       </div>
 
       <!-- 输入区 -->
-      <div class="border-t border-gray-100 dark:border-gray-800 p-4 flex-shrink-0 bg-white/40 dark:bg-gray-950/20">
+      <div class="border-t border-gray-100 dark:border-gray-800 p-4 flex-shrink-0 bg-zinc-50 dark:bg-gray-950/20">
         
-        <!-- 活动上下文窗口指示条 (Cursor IDE 极客风格，重新设计并高大上外显) -->
-        <div class="flex items-center justify-between text-[10px] mb-2 text-gray-500 dark:text-gray-400 select-none px-2.5 py-1.5 bg-gray-100/50 dark:bg-gray-900/40 border border-gray-200/40 dark:border-gray-800/40 rounded-xl">
-          <div class="flex items-center gap-1.5 font-semibold">
-            <Zap :size="11" class="text-amber-500 flex-shrink-0" :class="chat.sending ? 'animate-pulse' : ''" />
-            <span class="font-bold tracking-wide">上下文窗口已用：</span>
-            <span class="font-bold font-mono" :class="currentContextTokens > 800000 ? 'text-red-500' : currentContextTokens > 500000 ? 'text-amber-500' : 'text-primary-600 dark:text-primary-400'">
-              {{ currentContextPercent }}% ({{ formatTokens(currentContextTokens) }} / 1.0M tokens)
-            </span>
-          </div>
-          <!-- 极客风细条进度槽 -->
-          <div class="w-24 h-1 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden flex-shrink-0 ml-2">
-            <div
-              class="h-full rounded-full transition-all duration-500 bg-gradient-to-r"
-              :class="currentContextPercent > 80 ? 'from-red-500 to-pink-500' : currentContextPercent > 50 ? 'from-amber-500 to-orange-500' : 'from-primary-500 to-indigo-500'"
-              :style="{ width: `${currentContextPercent}%` }"
-            ></div>
-          </div>
-        </div>
+
 
         <!-- 文本域与动作按钮 -->
         <div class="flex gap-2.5">
@@ -637,7 +620,7 @@ function onKeyDown(e: KeyboardEvent) {
             v-model="inputText"
             placeholder="输入消息，Enter 发送，Shift+Enter 换行"
             rows="2"
-            class="flex-1 resize-none px-4 py-2.5 bg-white/80 dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            class="flex-1 resize-none px-4 py-2.5 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-md text-xs focus:outline-none focus:ring-4 focus:ring-zinc-900/5 focus:border-zinc-400 dark:border-zinc-600 transition-all duration-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             :disabled="chat.sending"
             @keydown="onKeyDown"
           ></textarea>
@@ -645,7 +628,7 @@ function onKeyDown(e: KeyboardEvent) {
           <!-- 双态发送/停止按钮 -->
           <button
             v-if="!chat.sending"
-            class="px-5 py-2 bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white text-xs font-bold rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed self-end btn-shine-effect shadow-md shadow-gray-800/5 active:scale-95"
+            class="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-white dark:text-zinc-900 text-xs font-bold rounded-md transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed self-end  shadow-sm active:scale-95"
             :disabled="!inputText.trim()"
             @click="handleSend"
           >
@@ -653,7 +636,7 @@ function onKeyDown(e: KeyboardEvent) {
           </button>
           <button
             v-else
-            class="px-5 py-2 bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white text-xs font-bold rounded-xl transition-all duration-200 self-end flex items-center gap-1.5 shadow-md shadow-red-500/5 active:scale-95"
+            class="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-white dark:text-zinc-900 text-xs font-bold rounded-md transition-all duration-200 self-end flex items-center gap-1.5 shadow-sm active:scale-95"
             title="停止生成（智能体将在临近步骤完成时退出）"
             @click="chat.stopGenerating()"
           >
@@ -673,7 +656,7 @@ function onKeyDown(e: KeyboardEvent) {
       leave-from-class="opacity-100 translate-x-0"
       leave-to-class="opacity-0 translate-x-8"
     >
-      <div v-if="showThinking" class="w-96 flex-shrink-0 border-l border-gray-200/50 dark:border-gray-800/40 bg-white/40 dark:bg-[#0c0d14]/40 backdrop-blur-md">
+      <div v-if="showThinking" class="w-96 flex-shrink-0 border-l border-gray-200/50 dark:border-gray-800/40 bg-zinc-50 dark:bg-zinc-950 bg-white dark:bg-zinc-950">
         <ThinkingTrace />
       </div>
     </transition>
@@ -690,10 +673,10 @@ function onKeyDown(e: KeyboardEvent) {
   >
     <div
       v-if="showNewSessionModal"
-      class="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
+      class="fixed inset-0 bg-black/40 dark:bg-black/60  flex items-center justify-center z-50 px-4"
       @click.self="showNewSessionModal = false"
     >
-      <div class="bg-white/95 dark:bg-[#0c0d14]/95 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl p-6 w-full max-w-sm space-y-4 obsidian-glow">
+      <div class="bg-white/95 dark:bg-zinc-950 bg-white dark:bg-zinc-950 rounded-md border border-white/20 dark:border-white/5 shadow-lg border border-zinc-200 dark:border-zinc-800 p-6 w-full max-w-sm space-y-4 ">
         <h3 class="text-sm font-extrabold text-gray-800 dark:text-gray-100 font-outfit tracking-wide uppercase">新建智能对话会话</h3>
 
         <div>
@@ -702,7 +685,7 @@ function onKeyDown(e: KeyboardEvent) {
             v-model="newSessionTitle"
             type="text"
             placeholder="留空则以首条提问为标题"
-            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-md text-xs focus:outline-none focus:ring-4 focus:ring-zinc-900/5 focus:border-zinc-400 dark:border-zinc-600 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
           />
         </div>
 
@@ -710,7 +693,7 @@ function onKeyDown(e: KeyboardEvent) {
           <label class="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-0.5">关联知识库库管道（可选，启用 RAG）</label>
           <select
             v-model="newSessionKbId"
-            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all"
+            class="w-full px-3 py-2 bg-white dark:bg-gray-900/50 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-800 rounded-md text-xs focus:outline-none focus:ring-4 focus:ring-zinc-900/5 focus:border-zinc-400 dark:border-zinc-600 transition-all"
           >
             <option :value="null">（不关联，仅通用闲聊或协作）</option>
             <option v-for="k in kb.knowledgeBases" :key="k.id" :value="k.id">
@@ -724,7 +707,7 @@ function onKeyDown(e: KeyboardEvent) {
             取消
           </button>
           <button
-            class="px-4 py-1.5 text-xs font-bold bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-900 hover:to-gray-800 text-white rounded-xl transition-all shadow-md active:scale-95"
+            class="px-4 py-1.5 text-xs font-bold bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-white dark:text-zinc-900 rounded-md transition-all shadow-md active:scale-95"
             @click="handleNewSession"
           >
             创建会话

@@ -31,26 +31,26 @@ function switchScope(scope: 'all' | 'global' | 'kb') {
 const typeConfig: Record<string, { label: string; color: string; bgColor: string; icon: any }> = {
   error_lesson: {
     label: '错误教训',
-    color: 'text-red-700 dark:text-red-300',
-    bgColor: 'bg-red-100 dark:bg-red-900/30',
+    color: 'text-zinc-700 dark:text-zinc-300',
+    bgColor: 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700',
     icon: AlertTriangle,
   },
   env_constraint: {
     label: '环境约束',
-    color: 'text-amber-700 dark:text-amber-300',
-    bgColor: 'bg-amber-100 dark:bg-amber-900/30',
+    color: 'text-zinc-700 dark:text-zinc-300',
+    bgColor: 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700',
     icon: Settings,
   },
   preference: {
     label: '用户偏好',
-    color: 'text-sky-700 dark:text-sky-300',
-    bgColor: 'bg-sky-100 dark:bg-sky-900/30',
+    color: 'text-zinc-700 dark:text-zinc-300',
+    bgColor: 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700',
     icon: Heart,
   },
   knowledge: {
     label: '知识记录',
-    color: 'text-emerald-700 dark:text-emerald-300',
-    bgColor: 'bg-emerald-100 dark:bg-emerald-900/30',
+    color: 'text-zinc-700 dark:text-zinc-300',
+    bgColor: 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700',
     icon: BookOpen,
   },
 }
@@ -111,7 +111,7 @@ async function confirmDelete(factId: number) {
     <header class="flex-shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-8 py-5">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 text-white flex items-center justify-center shadow-sm">
+          <div class="w-10 h-10 rounded-md bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 text-white dark:text-zinc-900 flex items-center justify-center shadow-sm">
             <Brain :size="20" :stroke-width="2" />
           </div>
           <div>
@@ -123,7 +123,7 @@ async function confirmDelete(factId: number) {
         </div>
         <button
           @click="memory.fetchFacts()"
-          class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+          class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-sm transition-colors"
           :class="{ 'animate-spin': memory.loading }"
         >
           <RefreshCw :size="16" :stroke-width="2" :class="{ 'animate-spin': memory.loading }" />
@@ -138,7 +138,7 @@ async function confirmDelete(factId: number) {
             @click="switchScope('all')"
             class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
             :class="scopeFilter === 'all'
-              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900'
+              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-zinc-900 dark:text-gray-900'
               : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
           >
             全部
@@ -147,7 +147,7 @@ async function confirmDelete(factId: number) {
             @click="switchScope('global')"
             class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1"
             :class="scopeFilter === 'global'
-              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900'
+              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-zinc-900 dark:text-gray-900'
               : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
           >
             <Globe :size="11" />
@@ -157,7 +157,7 @@ async function confirmDelete(factId: number) {
             @click="switchScope('kb')"
             class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1"
             :class="scopeFilter === 'kb'
-              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900'
+              ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-zinc-900 dark:text-gray-900'
               : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'"
           >
             <Database :size="11" />
@@ -168,7 +168,7 @@ async function confirmDelete(factId: number) {
           @click="memory.setFilter(null)"
           class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
           :class="memory.filterType === null
-            ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 ring-1 ring-violet-300 dark:ring-violet-700'
+            ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'"
         >
           全部 ({{ memory.facts.length }})
@@ -215,7 +215,7 @@ async function confirmDelete(factId: number) {
         <div
           v-for="fact in memory.filteredFacts"
           :key="fact.id"
-          class="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
+          class="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-md p-4 hover:border-zinc-400 hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
         >
           <!-- 卡片头部：类型标签 + 重要性 + 操作 -->
           <div class="flex items-center justify-between mb-2.5">
@@ -234,8 +234,8 @@ async function confirmDelete(factId: number) {
                   <span
                     class="block h-full rounded-full transition-all"
                     :class="{
-                      'bg-red-500': fact.importance >= 0.8,
-                      'bg-amber-500': fact.importance >= 0.5 && fact.importance < 0.8,
+                      'bg-zinc-900 dark:bg-zinc-100': fact.importance >= 0.8,
+                      'bg-zinc-500 dark:bg-zinc-400': fact.importance >= 0.5 && fact.importance < 0.8,
                       'bg-gray-400': fact.importance < 0.5,
                     }"
                     :style="{ width: `${fact.importance * 100}%` }"
@@ -251,7 +251,7 @@ async function confirmDelete(factId: number) {
                 <span class="text-xs text-red-600 dark:text-red-400">确认删除？</span>
                 <button
                   @click="confirmDelete(fact.id)"
-                  class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                  class="px-2 py-1 text-xs bg-red-600 text-white dark:text-zinc-900 rounded hover:bg-red-700 transition-colors"
                   :disabled="deletingId === fact.id"
                 >
                   {{ deletingId === fact.id ? '删除中...' : '确认' }}
@@ -266,7 +266,7 @@ async function confirmDelete(factId: number) {
               <button
                 v-else
                 @click="startDelete(fact.id)"
-                class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all"
+                class="p-1.5 rounded-sm text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all"
                 title="删除此记忆"
               >
                 <Trash2 :size="14" :stroke-width="2" />
@@ -282,7 +282,7 @@ async function confirmDelete(factId: number) {
             <div class="flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
               <span
                 v-if="fact.kb_id"
-                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700"
               >
                 <Database :size="9" />
                 KB#{{ fact.kb_id }}

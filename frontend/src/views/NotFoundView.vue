@@ -42,14 +42,14 @@ function goHome() {
 
       <div class="flex justify-center gap-3 mt-8">
         <button
-          class="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          class="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           @click="goBack"
         >
           <ArrowLeft :size="16" />
           <span>返回上一页</span>
         </button>
         <button
-          class="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+          class="flex items-center gap-1.5 px-4 py-2 text-sm text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-100 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 transition-colors"
           @click="goHome"
         >
           <Home :size="16" />

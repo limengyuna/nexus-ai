@@ -1,26 +1,20 @@
 <script setup lang="ts">
 /**
- * 首页（占位）
- *
- * 阶段一仅做：欢迎信息 + 当前用户信息展示 + 登出按钮。
- * 阶段四将替换为完整的对话/管理界面。
+ * 工作区首页 (Dashboard)
+ * 极致冷淡黑白灰风格
  */
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
 
-// 进入页面时确保用户信息已加载
 onMounted(async () => {
   if (!auth.userInfo) {
     try {
       await auth.fetchUserInfo()
-    } catch {
-      // 拉取失败由 axios 拦截器自动跳转登录页
-    }
+    } catch {}
   }
 })
 
@@ -31,56 +25,80 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <!-- 顶部导航 -->
-    <header class="bg-white shadow-sm">
-      <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-        <h1 class="text-xl font-bold text-primary-700">NexusAI</h1>
+  <div class="h-full bg-white dark:bg-zinc-950 overflow-y-auto text-zinc-900 dark:text-zinc-100 font-sans">
+    
+    <!-- 极简 Header，仅通过下边框分隔 -->
+    <header class="border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-20">
+      <div class="px-8 py-5 flex items-center justify-between">
+        <h1 class="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Workspace</h1>
         <div class="flex items-center gap-4">
-          <span class="text-sm text-gray-600">
-            {{ auth.userInfo?.username }}
-            <span class="ml-2 px-2 py-0.5 text-xs rounded-full bg-primary-100 text-primary-700">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              {{ auth.userInfo?.username }}
+            </span>
+            <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-sm bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
               {{ auth.userInfo?.role }}
             </span>
-          </span>
-          <button
-            class="text-sm text-gray-500 hover:text-red-600 transition-colors"
-            @click="handleLogout"
-          >
-            登出
-          </button>
+          </div>
         </div>
       </div>
     </header>
 
-    <!-- 主体 -->
-    <main class="max-w-6xl mx-auto px-6 py-12">
-      <div class="bg-white rounded-2xl shadow-sm p-8 space-y-6">
-        <div>
-          <h2 class="text-2xl font-bold text-gray-800">欢迎来到 NexusAI</h2>
-          <p class="mt-2 text-gray-500">
-            企业级智能知识库 + 多 Agent 协作平台 — 阶段一基座已就绪。
+    <!-- 主体内容 -->
+    <main class="max-w-5xl mx-auto px-8 py-12">
+      <div class="space-y-8">
+        <!-- 欢迎区 -->
+        <div class="space-y-2">
+          <h2 class="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">Welcome to NexusAI</h2>
+          <p class="text-sm text-zinc-500 dark:text-zinc-400 max-w-2xl leading-relaxed">
+            Enterprise-grade intelligent knowledge base and multi-agent autonomous swarm workspace. Phase 1 foundation is ready.
           </p>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div class="border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-            <div class="text-primary-600 font-semibold mb-2">阶段一 ✓</div>
-            <div class="text-sm text-gray-600">FastAPI 基座 + JWT 认证 + 数据库 + Celery</div>
+        <!-- 状态卡片网格 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          <!-- Phase 1: Completed -->
+          <div class="border border-zinc-200 dark:border-zinc-800 rounded-md p-6 bg-zinc-50/50 dark:bg-zinc-900/20 transition-colors">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Phase 1</div>
+              <div class="text-xs font-mono px-2 py-1 bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 rounded-sm">Active</div>
+            </div>
+            <div class="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+              FastAPI foundation, JWT authentication, vector database integration, and async task processing.
+            </div>
           </div>
-          <div class="border border-gray-200 rounded-xl p-5 opacity-60">
-            <div class="text-gray-700 font-semibold mb-2">阶段二</div>
-            <div class="text-sm text-gray-600">RAG 知识库管道（解析→分块→向量化）</div>
+
+          <!-- Phase 2: Pending -->
+          <div class="border border-zinc-200 dark:border-zinc-800 rounded-md p-6 opacity-60">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Phase 2</div>
+              <div class="text-xs font-mono px-2 py-1 bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 rounded-sm">Pending</div>
+            </div>
+            <div class="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+              RAG knowledge pipeline. Document parsing, semantic chunking, and distributed vectorization.
+            </div>
           </div>
-          <div class="border border-gray-200 rounded-xl p-5 opacity-60">
-            <div class="text-gray-700 font-semibold mb-2">阶段三</div>
-            <div class="text-sm text-gray-600">LangGraph 多 Agent + Skills + MCP</div>
+
+          <!-- Phase 3: Pending -->
+          <div class="border border-zinc-200 dark:border-zinc-800 rounded-md p-6 opacity-60">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Phase 3</div>
+              <div class="text-xs font-mono px-2 py-1 bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 rounded-sm">Pending</div>
+            </div>
+            <div class="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+              LangGraph multi-agent orchestration, custom Skills execution, and MCP protocol integration.
+            </div>
           </div>
+
         </div>
 
-        <div class="text-xs text-gray-400 pt-4 border-t border-gray-100">
-          后续阶段将逐步加入对话界面、知识库管理、MCP 配置等功能。
+        <div class="pt-8 mt-8 border-t border-zinc-200 dark:border-zinc-800">
+          <p class="text-xs text-zinc-400 dark:text-zinc-500">
+            Subsequent phases will gradually introduce the conversational interface, knowledge base management, and advanced MCP configurations.
+          </p>
         </div>
+
       </div>
     </main>
   </div>

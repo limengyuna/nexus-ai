@@ -107,7 +107,7 @@ async function handleTest() {
     <div class="w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
       <div class="p-4 border-b border-gray-200 dark:border-gray-800">
         <h2 class="text-sm font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
-          <Sparkles :size="16" class="text-primary-600 dark:text-primary-400" />
+          <Sparkles :size="16" class="text-zinc-900 dark:text-zinc-100 dark:text-zinc-100" />
           已注册 Skills
         </h2>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -126,9 +126,9 @@ async function handleTest() {
         <div
           v-for="s in skills"
           :key="s.name"
-          class="p-3 rounded-lg cursor-pointer transition-colors group"
+          class="p-3 rounded-sm cursor-pointer transition-colors group"
           :class="activeName === s.name
-            ? 'bg-primary-100 dark:bg-primary-900/40'
+            ? 'bg-zinc-200/50 dark:bg-zinc-800/50'
             : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
           @click="selectSkill(s.name)"
         >
@@ -183,7 +183,7 @@ async function handleTest() {
               <span
                 v-for="t in activeSkill.required_tools"
                 :key="t"
-                class="px-2 py-0.5 text-xs font-mono bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded"
+                class="px-2 py-0.5 text-xs font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 rounded"
               >
                 {{ t }}
               </span>
@@ -203,7 +203,7 @@ async function handleTest() {
               <span
                 v-for="kw in activeSkill.trigger_keywords"
                 :key="kw"
-                class="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded"
+                class="px-2 py-0.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 rounded"
               >
                 {{ kw }}
               </span>
@@ -226,7 +226,7 @@ async function handleTest() {
             <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">选择知识库（该 Skill 需要）</label>
             <select
               v-model="testKbId"
-              class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
             >
               <option :value="null" disabled>请选择...</option>
               <option v-for="k in kb.knowledgeBases" :key="k.id" :value="k.id">
@@ -240,12 +240,12 @@ async function handleTest() {
               v-model="testInput"
               type="text"
               placeholder="输入示例问题..."
-              class="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              class="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 placeholder:text-gray-400 dark:placeholder:text-gray-500"
               :disabled="testing"
               @keydown.enter="handleTest"
             />
             <button
-              class="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
               :disabled="testing || !testInput.trim()"
               @click="handleTest"
             >
@@ -258,7 +258,7 @@ async function handleTest() {
           <!-- 测试结果 -->
           <div v-if="testResult" class="mt-4 space-y-3">
             <!-- 回答 -->
-            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <div class="border border-gray-200 dark:border-gray-700 rounded-sm overflow-hidden">
               <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
                 Skill 回复
               </div>
@@ -268,7 +268,7 @@ async function handleTest() {
             </div>
 
             <!-- Tool 调用记录 -->
-            <div v-if="testResult.tool_calls.length > 0" class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <div v-if="testResult.tool_calls.length > 0" class="border border-gray-200 dark:border-gray-700 rounded-sm overflow-hidden">
               <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
                 Tool 调用链路 ({{ testResult.tool_calls.length }} 次)
               </div>

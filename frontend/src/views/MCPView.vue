@@ -269,9 +269,9 @@ async function handleDelete(id: number) {
 }
 
 function transportColor(t: string): string {
-  if (t === 'stdio') return 'bg-purple-100 text-purple-700'
-  if (t === 'sse') return 'bg-blue-100 text-blue-700'
-  return 'bg-gray-100 text-gray-700'
+  if (t === 'stdio') return 'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700'
+  if (t === 'sse') return 'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700'
+  return 'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700'
 }
 </script>
 
@@ -281,7 +281,7 @@ function transportColor(t: string): string {
     <div class="w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
       <div class="p-3 border-b border-gray-200 dark:border-gray-800">
         <button
-          class="w-full py-2 px-3 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 flex items-center justify-center gap-1.5"
+          class="w-full py-2 px-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 flex items-center justify-center gap-1.5"
           @click="showCreateModal = true"
         >
           <Plus :size="16" :stroke-width="2.5" />
@@ -296,15 +296,15 @@ function transportColor(t: string): string {
         <div
           v-for="s in servers"
           :key="s.id"
-          class="group p-3 rounded-lg cursor-pointer transition-colors"
-          :class="activeServerId === s.id ? 'bg-primary-100 dark:bg-primary-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
+          class="group p-3 rounded-sm cursor-pointer transition-colors"
+          :class="activeServerId === s.id ? 'bg-zinc-200/50 dark:bg-zinc-800/50' : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
           @click="selectServer(s.id)"
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate flex items-center gap-1.5">
                 <span class="truncate">{{ s.name }}</span>
-                <span v-if="s.tool_count > 0" class="flex-shrink-0 px-1 py-0.2 text-[10px] bg-purple-50 text-purple-600 rounded dark:bg-purple-900/20 dark:text-purple-400">
+                <span v-if="s.tool_count > 0" class="flex-shrink-0 px-1 py-0.2 text-[10px] bg-zinc-100 text-zinc-700 border border-zinc-200 rounded dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
                   {{ s.tool_count }} 工具
                 </span>
               </div>
@@ -340,12 +340,12 @@ function transportColor(t: string): string {
               <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {{ servers.find(s => s.id === activeServerId)?.name }}
               </h2>
-              <span class="px-2 py-0.5 text-xs bg-purple-50 text-purple-600 rounded-full dark:bg-purple-900/20 dark:text-purple-400 font-medium">
+              <span class="px-2 py-0.5 text-xs bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-full dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700 font-medium">
                 {{ activeTools.length }} 个工具已预缓存
               </span>
             </div>
             <button 
-              class="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 flex items-center gap-1.5 py-1 px-2.5 border border-primary-200 dark:border-primary-800 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/10 disabled:opacity-50"
+              class="text-xs text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-300 flex items-center gap-1.5 py-1 px-2.5 border border-zinc-200 dark:border-zinc-800 rounded-sm hover:bg-zinc-100 dark:hover:bg-primary-900/10 disabled:opacity-50"
               :disabled="refreshing"
               @click="handleRefreshCache"
             >
@@ -355,7 +355,7 @@ function transportColor(t: string): string {
           </div>
 
           <!-- 第二行：整体描述展示与编辑 -->
-          <div class="bg-gray-50 dark:bg-gray-900/60 rounded-xl p-3.5 border border-gray-100 dark:border-gray-800/80">
+          <div class="bg-gray-50 dark:bg-gray-900/60 rounded-md p-3.5 border border-gray-100 dark:border-gray-800/80">
             <!-- 默认展示状态 -->
             <div v-if="!editingDesc" class="flex items-start justify-between gap-4 group">
               <div class="flex-1 min-w-0">
@@ -373,7 +373,7 @@ function transportColor(t: string): string {
                 </p>
               </div>
               <button 
-                class="flex-shrink-0 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1"
+                class="flex-shrink-0 flex items-center gap-1 text-xs text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 font-medium bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-sm px-2.5 py-1"
                 @click="editingDesc = true; editDescValue = servers.find(s => s.id === activeServerId)?.description || ''"
               >
                 <Edit3 :size="12" />
@@ -389,7 +389,7 @@ function transportColor(t: string): string {
                 </span>
                 
                 <button 
-                  class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 disabled:opacity-50"
+                  class="text-xs text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 flex items-center gap-1 disabled:opacity-50"
                   :disabled="generatingEditDesc"
                   @click="handleRegenerateEditDesc"
                 >
@@ -402,20 +402,20 @@ function transportColor(t: string): string {
               <textarea 
                 v-model="editDescValue"
                 rows="2"
-                class="w-full px-3 py-2 border border-primary-300 dark:border-primary-800 focus:ring-1 focus:ring-primary-500 rounded-lg text-sm bg-white dark:bg-gray-950 text-gray-800 dark:text-gray-100"
+                class="w-full px-3 py-2 border border-primary-300 dark:border-zinc-800 focus:ring-1 focus:ring-zinc-900 rounded-sm text-sm bg-white dark:bg-gray-950 text-gray-800 dark:text-gray-100"
                 placeholder="介绍该模块整体用途，供 Supervisor 智能分步调度选择。"
               ></textarea>
 
               <div class="flex items-center justify-end gap-2 pt-1 border-t border-gray-100 dark:border-gray-800/50">
                 <button 
-                  class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-lg"
+                  class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-sm"
                   @click="editingDesc = false"
                 >
                   <X :size="12" />
                   <span>取消</span>
                 </button>
                 <button 
-                  class="px-3 py-1 text-xs bg-green-600 text-white hover:bg-green-700 flex items-center gap-1 rounded-lg disabled:opacity-50"
+                  class="px-3 py-1 text-xs bg-green-600 text-white dark:text-zinc-900 hover:bg-green-700 flex items-center gap-1 rounded-sm disabled:opacity-50"
                   :disabled="savingDesc"
                   @click="handleSaveDesc"
                 >
@@ -439,7 +439,7 @@ function transportColor(t: string): string {
             <span>正在读取工具列表缓存...</span>
           </div>
 
-          <div v-else-if="toolError" class="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm">
+          <div v-else-if="toolError" class="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-sm text-sm">
             <div class="font-semibold mb-1">连接失败</div>
             <div>{{ toolError }}</div>
           </div>
@@ -452,10 +452,10 @@ function transportColor(t: string): string {
             <div
               v-for="t in activeTools"
               :key="t.name"
-              class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-sm transition-shadow"
+              class="border border-gray-200 dark:border-gray-700 rounded-sm p-4 hover:shadow-sm transition-shadow"
             >
               <div class="flex items-center gap-2 mb-2">
-                <span class="font-mono text-sm font-semibold text-purple-700 dark:text-purple-300">{{ t.name }}</span>
+                <span class="font-mono text-sm font-semibold text-zinc-700 dark:text-zinc-300">{{ t.name }}</span>
               </div>
               <p class="text-sm text-gray-600 dark:text-gray-300 mb-3">{{ t.description || '(无描述)' }}</p>
               <details class="text-xs">
@@ -475,17 +475,17 @@ function transportColor(t: string): string {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="showCreateModal = false"
   >
-    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-[34rem] space-y-3 max-h-[90vh] overflow-y-auto">
+    <div class="bg-white dark:bg-gray-900 rounded-md shadow-sm border border-zinc-200 dark:border-zinc-800 p-6 w-[34rem] space-y-3 max-h-[90vh] overflow-y-auto">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">新建 MCP Server 连接</h3>
 
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-gray-700 mb-1">名称 *</label>
-          <input v-model="createForm.name" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="如: FileSystem" />
+          <input v-model="createForm.name" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm" placeholder="如: FileSystem" />
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-700 mb-1">传输方式</label>
-          <select v-model="createForm.transport_type" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+          <select v-model="createForm.transport_type" class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm bg-white">
             <option value="stdio">stdio（本地命令）</option>
             <option value="sse">sse（远程 HTTP）</option>
           </select>
@@ -499,7 +499,7 @@ function transportColor(t: string): string {
             {{ createForm.transport_type === 'stdio' ? '示例: npx -y @modelcontextprotocol/server-filesystem /tmp' : '示例: http://example.com/sse' }}
           </span>
         </label>
-        <input v-model="createForm.connection_uri" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" />
+        <input v-model="createForm.connection_uri" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm font-mono" />
       </div>
 
       <div v-if="createForm.transport_type === 'stdio'">
@@ -508,7 +508,7 @@ function transportColor(t: string): string {
           v-model="createForm.env_vars_text"
           rows="2"
           placeholder='例：{"GITHUB_TOKEN": "ghp_xxx"}'
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm font-mono"
         ></textarea>
       </div>
 
@@ -521,7 +521,7 @@ function transportColor(t: string): string {
           </span>
           <button 
             v-else-if="testResult && testResult.ok && testResult.tools_detail.length > 0"
-            class="text-[10px] text-primary-600 hover:text-primary-700 flex items-center gap-0.5"
+            class="text-[10px] text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 flex items-center gap-0.5"
             @click="handleGenerateDescription"
           >
             <Sparkles :size="10" />
@@ -531,7 +531,7 @@ function transportColor(t: string): string {
         <textarea 
           v-model="createForm.description" 
           rows="2" 
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          class="w-full px-3 py-2 border border-gray-300 rounded-sm text-sm"
           placeholder="介绍该模块整体用途，供 Supervisor 智能分步调度选择。推荐利用 AI 生成以保证准确性。"
         ></textarea>
       </div>
@@ -539,10 +539,10 @@ function transportColor(t: string): string {
       <!-- 测试连接结果卡片 -->
       <div
         v-if="testResult"
-        class="rounded-lg p-3 text-xs border"
+        class="rounded-sm p-3 text-xs border"
         :class="testResult.ok
-          ? 'bg-green-50 border-green-200 text-green-800'
-          : 'bg-red-50 border-red-200 text-red-800'"
+          ? 'bg-zinc-50 border-zinc-200 text-zinc-800 dark:bg-zinc-900 dark:border-zinc-700 dark:text-zinc-200'
+          : 'bg-zinc-50 border-zinc-200 text-zinc-800 dark:bg-zinc-900 dark:border-zinc-700 dark:text-zinc-200'"
       >
         <div class="flex items-center gap-2 font-medium">
           <CheckCircle2 v-if="testResult.ok" :size="14" />
@@ -553,7 +553,7 @@ function transportColor(t: string): string {
         <div v-if="testResult.ok" class="mt-1.5 text-gray-700">
           发现 <b>{{ testResult.tools_count }}</b> 个工具，已经为你写入预缓存。
           <div class="mt-1 flex flex-wrap gap-1">
-            <span v-for="t in testResult.tools_detail.slice(0, 10)" :key="t.name" class="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px]">
+            <span v-for="t in testResult.tools_detail.slice(0, 10)" :key="t.name" class="px-1.5 py-0.5 bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700 rounded text-[10px]">
               {{ t.name }}
             </span>
             <span v-if="testResult.tools_count > 10" class="text-[10px] text-gray-400">及其他 {{ testResult.tools_count - 10 }} 个...</span>
@@ -567,7 +567,7 @@ function transportColor(t: string): string {
       <!-- 按钮区 -->
       <div class="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
         <button
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-sm hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="testing || !createForm.connection_uri.trim()"
           title="连接外部 Server，并自动预拉取工具列表"
           @click="handleTest"
@@ -580,7 +580,7 @@ function transportColor(t: string): string {
         <div class="flex-1"></div>
 
         <button class="px-4 py-1.5 text-sm text-gray-600" @click="showCreateModal = false; testResult = null">取消</button>
-        <button class="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700" @click="handleCreate">
+        <button class="px-4 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900" @click="handleCreate">
           创建并预缓存
         </button>
       </div>
