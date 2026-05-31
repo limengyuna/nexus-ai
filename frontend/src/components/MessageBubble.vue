@@ -134,12 +134,7 @@ const shortTime = computed(() => {
         <!-- 忠实度徽章（仅当前活跃的思考过程消息 + 有校验结果时显示） -->
         <span
           v-if="!isUser && isThinkingActive && chatStore.lastFaithfulness && chatStore.lastFaithfulness.score >= 0"
-          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
-          :class="{
-            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score >= 0.8,
-            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score >= 0.5 && chatStore.lastFaithfulness.score < 0.8,
-            'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700': chatStore.lastFaithfulness.score < 0.5,
-          }"
+          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700"
           :title="`忠实度: ${Math.round(chatStore.lastFaithfulness.score * 100)}% (${chatStore.lastFaithfulness.supported_claims}/${chatStore.lastFaithfulness.total_claims} 条声明有据可查)`"
         >
           <ShieldCheck :size="10" />
