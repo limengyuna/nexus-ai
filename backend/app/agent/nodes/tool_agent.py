@@ -26,6 +26,10 @@ _TOOL_AGENT_SYSTEM_PROMPT = """你是 NexusAI 的工具执行助手。
 
 可用工具会以 function calling 的形式提供。
 
+业务上下文工具使用规则：
+- 当用户询问自己的账号、知识库数量、上传文档数量、文档处理状态、当前会话、MCP 配置等 NexusAI 系统内个人数据时，优先调用对应的业务上下文工具。
+- 不要编造账号或统计数据；如果需要这些信息，必须先调用工具。
+
 约束：
 1. 必须基于工具返回的结果回答，不要编造
 2. 如果一个工具返回了错误，再尝试用其他工具或直接告知用户
@@ -396,7 +400,16 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                     tool_result = {"error": f"未知工具: {tool_name}"}
                 else:
                     try:
-                        tool_result = tool.run(**args)
+                        if getattr(tool, "needs_agent_context", False):
+                            from app.agent.tools.business_context import AgentRuntimeContext
+                            runtime_context = AgentRuntimeContext(
+                                user_id=state.get("user_id"),
+                                session_id=state.get("session_id"),
+                                kb_id=state.get("kb_id"),
+                            )
+                            tool_result = tool.run_with_context(args, runtime_context)
+                        else:
+                            tool_result = tool.run(**args)
                     except Exception as e:
                         logger.exception("[Tool Agent] 工具 {} 调用失败", tool_name)
                         tool_result = {"error": str(e)}

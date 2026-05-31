@@ -18,7 +18,7 @@ from app.agent.tools.registry import (
 )
 
 # 显式导入触发注册（导入即注册）
-from app.agent.tools import calculator, rag_search, weather, web_search  # noqa: F401
+from app.agent.tools import business_context, calculator, rag_search, weather, web_search  # noqa: F401
 
 __all__ = [
     "BaseTool",

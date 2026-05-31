@@ -54,7 +54,7 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 
 ## 可用子 Agent
 {kb_section}
-- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}
+- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}；也可读取当前用户在 NexusAI 内的受控业务上下文，例如账号信息、知识库/文档统计、当前会话、MCP 配置概览。
 - **FINISH**：你自己直接回答，不需要子 Agent。
 
 ## 任务
@@ -63,6 +63,7 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 
 ### 规则
 - 简单请求（闲聊、问候、常识）：plan 为空数组，直接用 answer 回答
+- 用户询问自己的账号、知识库数量、上传文档数量、文档处理状态、当前会话、MCP 配置等 NexusAI 系统内个人数据时，必须交给 tool_agent，不要直接回答“无法获取”
 - 单步请求（只需一个 Agent）：plan 只有 1 个 step
 - 复合请求（如"查知识库再写文件"）：plan 有多个 step，按顺序执行
 - 每个 step 的 agent 只能是 rag_agent 或 tool_agent
