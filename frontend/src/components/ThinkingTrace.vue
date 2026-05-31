@@ -11,7 +11,7 @@
 import { computed, ref } from 'vue'
 import {
   Sparkles, Zap, Copy, Check, CircleCheck, Circle, Loader,
-  BookOpen, Wrench, ChevronDown, ChevronRight, Clock, Brain, ShieldCheck
+  BookOpen, Wrench, ChevronDown, ChevronRight, Clock, Brain, ShieldCheck, Building
 } from 'lucide-vue-next'
 
 import { useChatStore } from '@/stores/chat'
@@ -55,6 +55,10 @@ function toggleDoc(index: number) {
 
 // 全局工具调用展开
 const expandedTools = ref(false)
+
+// 业务上下文展开
+const expandedBusinessContext = ref(false)
+const businessContext = computed(() => chat.lastRetrievedBusinessContext || [])
 
 // 决策历史展开状态
 const expandedDecisions = ref(false)
@@ -474,6 +478,45 @@ function agentBadgeClass(agent: string) {
               <p class="mt-1 text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed whitespace-pre-wrap break-words bg-amber-50/50 dark:bg-amber-900/10 rounded p-2 max-h-40 overflow-y-auto">
                 {{ doc.metadata.parent_content }}
               </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 业务上下文 ========== -->
+      <section v-if="businessContext.length > 0">
+        <div
+          class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200"
+          @click="expandedBusinessContext = !expandedBusinessContext"
+        >
+          <component :is="expandedBusinessContext ? ChevronDown : ChevronRight" :size="12" />
+          <Building :size="12" class="text-orange-500" />
+          系统业务上下文
+          <span class="text-gray-400 dark:text-gray-500 font-normal">({{ businessContext.length }} 项)</span>
+        </div>
+        <div v-if="expandedBusinessContext" class="space-y-2">
+          <div
+            v-for="(bc, i) in businessContext"
+            :key="i"
+            class="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-orange-50/30 dark:bg-orange-900/10"
+          >
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="font-mono text-xs font-semibold text-orange-700 dark:text-orange-300">{{ bc.name }}</span>
+              <span class="text-[10px] text-gray-400 dark:text-gray-500">{{ bc.elapsed_ms }}ms</span>
+            </div>
+            <details class="text-xs">
+              <summary class="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">上下文内容</summary>
+              <div class="relative group mt-1.5">
+                <button
+                  @click.stop="copyToClipboard(formatArgs({ arguments: bc.arguments, result: bc.result }), i + 200)"
+                  class="absolute right-2 top-2 p-1.5 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 z-10"
+                  title="复制"
+                >
+                  <Check v-if="copiedIndex === i + 200" :size="12" class="text-green-600 dark:text-green-400" />
+                  <Copy v-else :size="12" />
+                </button>
+                <pre class="p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto text-[11px] text-gray-700 dark:text-gray-200 pr-10 max-h-40 overflow-y-auto font-mono">{{ formatArgs({ arguments: bc.arguments, result: bc.result }) }}</pre>
+              </div>
             </details>
           </div>
         </div>

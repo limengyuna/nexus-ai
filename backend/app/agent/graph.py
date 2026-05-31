@@ -25,20 +25,23 @@ from langgraph.graph import END, START, StateGraph
 from loguru import logger
 
 from app.agent.nodes.context_prep import context_prep_node
-from app.agent.nodes.supervisor import supervisor_node, NEXT_RAG, NEXT_TOOL, NEXT_FINISH
+from app.agent.nodes.supervisor import supervisor_node, NEXT_RAG, NEXT_TOOL, NEXT_BUSINESS_CONTEXT, NEXT_FINISH
 from app.agent.nodes.rag_agent import rag_agent_node
 from app.agent.nodes.tool_agent import tool_agent_node
+from app.agent.nodes.business_context_agent import business_context_agent_node
 from app.agent.state import AgentState
 
 
 # ---------- 条件边：Supervisor 决策后的路由 ----------
-def _supervisor_route(state: AgentState) -> Literal["rag_agent", "tool_agent", "__end__"]:
+def _supervisor_route(state: AgentState) -> Literal["rag_agent", "tool_agent", "business_context_agent", "__end__"]:
     """根据 Supervisor 的 next_agent 决策路由"""
     next_agent = state.get("next_agent", NEXT_FINISH)
     if next_agent == NEXT_RAG:
         return "rag_agent"
     if next_agent == NEXT_TOOL:
         return "tool_agent"
+    if next_agent == NEXT_BUSINESS_CONTEXT:
+        return "business_context_agent"
     return "__end__"  # FINISH → 结束
 
 
@@ -56,6 +59,7 @@ def build_agent_graph():
     workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("rag_agent", rag_agent_node)
     workflow.add_node("tool_agent", tool_agent_node)
+    workflow.add_node("business_context_agent", business_context_agent_node)
 
     # 入口：START → context_prep → supervisor
     workflow.add_edge(START, "context_prep")
@@ -68,6 +72,7 @@ def build_agent_graph():
         {
             "rag_agent": "rag_agent",
             "tool_agent": "tool_agent",
+            "business_context_agent": "business_context_agent",
             "__end__": END,
         },
     )
@@ -75,6 +80,7 @@ def build_agent_graph():
     # 子 Agent 执行完后回到 Supervisor（循环）
     workflow.add_edge("rag_agent", "supervisor")
     workflow.add_edge("tool_agent", "supervisor")
+    workflow.add_edge("business_context_agent", "supervisor")
 
     # 注入 Checkpointer：支持 interrupt() 暂停/恢复 + 跨进程持久化
     from app.agent.checkpoint import get_checkpointer

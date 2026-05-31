@@ -9,6 +9,7 @@ LangGraph 会自动用 reducer 合并 partial state（如 add_messages 自动追
 - messages 用 Annotated + add_messages 实现"自动追加"语义
 - 用 execution_trace 记录每个节点的执行细节，前端"思考过程"面板就靠它
 """
+import operator
 import time
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
@@ -71,6 +72,15 @@ class ToolCallRecord(TypedDict, total=False):
     step: int                    # 归属的执行计划步骤编号
 
 
+class BusinessContextRecord(TypedDict, total=False):
+    """单条受控业务上下文记录"""
+    name: str
+    arguments: Dict[str, Any]
+    result: Any
+    elapsed_ms: int
+    error: Optional[str]
+
+
 # ---------- 主 State ----------
 class AgentState(TypedDict, total=False):
     """LangGraph 全局共享状态"""
@@ -108,6 +118,7 @@ class AgentState(TypedDict, total=False):
 
     # ---------- 输出 ----------
     final_answer: str                          # 最终回答（流式时也会逐步填充完整）
+    retrieved_business_context: Annotated[List[BusinessContextRecord], operator.add]
 
     # ---------- 可观测性 ----------
     execution_trace: List[TraceStep]           # 节点执行链路追踪
@@ -160,6 +171,7 @@ def make_initial_state(
         tool_calls=[],
         skill_used=None,
         final_answer="",
+        retrieved_business_context=[],
         execution_trace=[],
         total_tokens=0,
         error=None,

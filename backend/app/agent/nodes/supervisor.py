@@ -27,6 +27,7 @@ from app.agent.state import AgentState, append_trace
 # Supervisor 可分发的目标
 NEXT_RAG = "rag_agent"
 NEXT_TOOL = "tool_agent"
+NEXT_BUSINESS_CONTEXT = "business_context_agent"
 NEXT_FINISH = "FINISH"
 
 # Supervisor 最大循环次数（防止无限循环）
@@ -54,7 +55,8 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 
 ## 可用子 Agent
 {kb_section}
-- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}；也可读取当前用户在 NexusAI 内的受控业务上下文，例如账号信息、知识库/文档统计、当前会话、MCP 配置概览。
+- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}。
+- **business_context_agent**：读取当前用户在 NexusAI 系统内的受控业务上下文，例如账号信息、工作区概览、知识库/文档状态、当前会话、MCP 配置等。只读，不执行任意 SQL。
 - **FINISH**：你自己直接回答，不需要子 Agent。
 
 ## 任务
@@ -63,10 +65,13 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 
 ### 规则
 - 简单请求（闲聊、问候、常识）：plan 为空数组，直接用 answer 回答
-- 用户询问自己的账号、知识库数量、上传文档数量、文档处理状态、当前会话、MCP 配置等 NexusAI 系统内个人数据时，必须交给 tool_agent，不要直接回答“无法获取”
+- 【最高优先级】凡是涉及 NexusAI 系统内运行时数据或当前用户私有上下文的问题，必须交给 business_context_agent 获取真实数据后回答；包括但不限于账号信息、工作区概览、知识库/文档状态、会话上下文、MCP 配置等。
+- 即使用户说“调用工具查一下我的知识库/账号/文档状态”，也必须路由给 business_context_agent，不能路由给 tool_agent。
+- tool_agent 仅用于普通外部能力、通用工具和 Skill，例如计算、天气、Web 搜索、外部 MCP 工具或业务动作执行。
+- 不要直接回答“无法获取”，除非 business_context_agent 返回错误或无数据。
 - 单步请求（只需一个 Agent）：plan 只有 1 个 step
 - 复合请求（如"查知识库再写文件"）：plan 有多个 step，按顺序执行
-- 每个 step 的 agent 只能是 rag_agent 或 tool_agent
+- 每个 step 的 agent 只能是 rag_agent、tool_agent 或 business_context_agent
 - instruction 要具体明确，让子 Agent 知道该做什么
 
 ### needs_previous_output 字段
@@ -74,7 +79,7 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 - **false**：本步可独立执行，所需信息已在 instruction 中完整给出
 
 ### 输出格式（严格 JSON）
-{{"plan": [{{"step": 1, "agent": "rag_agent|tool_agent", "instruction": "具体指令", "needs_previous_output": false}}], "answer": "plan为空时的直接回答，有plan时留空"}}
+{{"plan": [{{"step": 1, "agent": "rag_agent|tool_agent|business_context_agent", "instruction": "具体指令", "needs_previous_output": false}}], "answer": "plan为空时的直接回答，有plan时留空"}}
 
 只输出 JSON，不要任何其他文字。"""
 
@@ -320,7 +325,7 @@ def _planning_phase(
     valid_plan = []
     for step in plan:
         agent = step.get("agent", "")
-        if agent not in {NEXT_RAG, NEXT_TOOL}:
+        if agent not in {NEXT_RAG, NEXT_TOOL, NEXT_BUSINESS_CONTEXT}:
             continue
         # 如果没有 KB 但分配了 rag_agent，跳过
         if agent == NEXT_RAG and not has_kb:
@@ -378,7 +383,14 @@ def _planning_phase(
     instruction = first_step["instruction"]
 
     # 映射 intent
-    intent = "rag" if next_agent == NEXT_RAG else "tool"
+    if next_agent == NEXT_RAG:
+        intent = "rag"
+    elif next_agent == NEXT_TOOL:
+        intent = "tool"
+    elif next_agent == NEXT_BUSINESS_CONTEXT:
+        intent = "business_context"
+    else:
+        intent = "chitchat"
     reason = f"执行计划 step 1/{len(valid_plan)}: {instruction[:30]}"
 
     logger.info("[Supervisor] 生成计划 ({} 步) → 执行 step 1: {} | {}", len(valid_plan), next_agent, instruction[:50])
@@ -486,7 +498,7 @@ def _execution_phase(
         # 追加新步骤
         for new_step in adjusted:
             agent = new_step.get("agent", "")
-            if agent in {NEXT_RAG, NEXT_TOOL}:
+            if agent in {NEXT_RAG, NEXT_TOOL, NEXT_BUSINESS_CONTEXT}:
                 task_plan.append({
                     "step": len(task_plan) + 1,
                     "agent": agent,
@@ -524,7 +536,14 @@ def _dispatch_step(
     step = task_plan[step_idx]
     next_agent = step["agent"]
     instruction = step["instruction"]
-    intent = "rag" if next_agent == NEXT_RAG else "tool"
+    if next_agent == NEXT_RAG:
+        intent = "rag"
+    elif next_agent == NEXT_TOOL:
+        intent = "tool"
+    elif next_agent == NEXT_BUSINESS_CONTEXT:
+        intent = "business_context"
+    else:
+        intent = "chitchat"
     reason = f"执行 step {step['step']}/{len(task_plan)}: {instruction[:30]}"
 
     # 动态填充 step_context：
@@ -588,9 +607,16 @@ def _finish_done(
         if step.get("status") == "completed":
             last_agent = step["agent"]
             break
-    intent = "cancelled" if cancelled else (
-        "rag" if last_agent == NEXT_RAG else ("tool" if last_agent == NEXT_TOOL else "chitchat")
-    )
+    if cancelled:
+        intent = "cancelled"
+    elif last_agent == NEXT_RAG:
+        intent = "rag"
+    elif last_agent == NEXT_TOOL:
+        intent = "tool"
+    elif last_agent == NEXT_BUSINESS_CONTEXT:
+        intent = "business_context"
+    else:
+        intent = "chitchat"
 
     # ---------- final_answer 处理 ----------
     final_answer = state.get("final_answer", "") or ""

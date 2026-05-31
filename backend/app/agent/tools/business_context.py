@@ -9,7 +9,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 
-from app.agent.tools.registry import BaseTool, register_tool
+from app.agent.tools.registry import BaseTool
 from app.core.database import SessionLocal
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentStatus
@@ -48,7 +48,6 @@ class WorkspaceSummaryArgs(BaseModel):
     pass
 
 
-@register_tool
 class WorkspaceSummaryTool(BusinessContextTool):
     name = "get_user_workspace_summary"
     description = (
@@ -137,7 +136,6 @@ class KnowledgeBaseOverviewArgs(BaseModel):
     include_recent_documents: bool = Field(default=False, description="是否包含最近最多3个文档信息")
 
 
-@register_tool
 class KnowledgeBaseOverviewTool(BusinessContextTool):
     name = "get_knowledge_base_overview"
     description = (
@@ -222,7 +220,6 @@ class CurrentSessionSummaryArgs(BaseModel):
     pass
 
 
-@register_tool
 class CurrentSessionSummaryTool(BusinessContextTool):
     name = "get_current_session_summary"
     description = (
@@ -286,7 +283,6 @@ class MCPServerOverviewArgs(BaseModel):
     include_tools: bool = Field(default=False, description="是否包含子工具名称和描述，最多返回前5个")
 
 
-@register_tool
 class MCPServerOverviewTool(BusinessContextTool):
     name = "get_mcp_server_overview"
     description = "获取当前用户 MCP 配置概览，包含外部工具信息。"
@@ -343,3 +339,20 @@ class MCPServerOverviewTool(BusinessContextTool):
             return {"error": str(e)}
         finally:
             db.close()
+
+
+_BUSINESS_CONTEXT_TOOLS = [
+    WorkspaceSummaryTool(),
+    KnowledgeBaseOverviewTool(),
+    CurrentSessionSummaryTool(),
+    MCPServerOverviewTool(),
+]
+
+def list_business_context_tools() -> List[BusinessContextTool]:
+    return list(_BUSINESS_CONTEXT_TOOLS)
+
+def get_business_context_tool(name: str) -> Optional[BusinessContextTool]:
+    for tool in _BUSINESS_CONTEXT_TOOLS:
+        if tool.name == name:
+            return tool
+    return None

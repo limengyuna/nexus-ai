@@ -639,6 +639,9 @@ class ChatService:
         faithfulness = json.loads(
             json.dumps(final_state.get("faithfulness", {}), default=str)
         )
+        retrieved_business_context = json.loads(
+            json.dumps(final_state.get("retrieved_business_context", []), default=str)
+        )
         yield (
             "done",
             {
@@ -648,6 +651,7 @@ class ChatService:
                 "execution_trace": execution_trace,
                 "retrieved_docs": retrieved_docs,
                 "retrieved_memories": retrieved_memories,
+                "retrieved_business_context": retrieved_business_context,
                 "task_plan": task_plan,
                 "faithfulness": faithfulness,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
@@ -830,6 +834,9 @@ class ChatService:
                 ),
                 "retrieved_memories": json.loads(
                     json.dumps(final_state.get("retrieved_memories", []), default=str)
+                ),
+                "retrieved_business_context": json.loads(
+                    json.dumps(final_state.get("retrieved_business_context", []), default=str)
                 ),
                 "task_plan": json.loads(
                     json.dumps(final_state.get("task_plan", []), default=str)

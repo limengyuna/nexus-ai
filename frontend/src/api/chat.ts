@@ -61,6 +61,14 @@ export interface RetrievedMemory {
   importance: number
 }
 
+export interface BusinessContextRecord {
+  name: string
+  arguments: Record<string, any>
+  result: any
+  elapsed_ms: number
+  error: string | null
+}
+
 export interface FaithfulnessClaim {
   text: string           // 从回答中提取的事实声明
   supported: boolean     // 是否有资料支撑
@@ -84,6 +92,7 @@ export interface ChatResponse {
   tool_calls: ToolCall[]
   retrieved_docs: RetrievedDoc[]
   retrieved_memories: RetrievedMemory[]
+  retrieved_business_context: BusinessContextRecord[]
   execution_trace: TraceStep[]
 }
 
@@ -177,6 +186,7 @@ export interface StreamHandlers {
     execution_trace: TraceStep[]
     retrieved_docs: RetrievedDoc[]
     retrieved_memories: RetrievedMemory[]
+    retrieved_business_context: BusinessContextRecord[]
     task_plan: any[]
     faithfulness: FaithfulnessResult | null
     token_usage: number

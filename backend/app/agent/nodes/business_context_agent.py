@@ -1,0 +1,176 @@
+"""
+Business Context Agent 节点
+
+职责：
+- 专门读取当前登录用户在 NexusAI 系统内的受控业务上下文。
+- 执行只读业务上下文工具。
+"""
+import time
+from typing import Any, Dict
+
+from loguru import logger
+
+from app.agent.llm import get_llm_fast
+from app.agent.state import AgentState, append_trace
+from app.agent.stream_queue import get_queue
+from app.agent.tools.business_context import (
+    AgentRuntimeContext,
+    list_business_context_tools,
+    get_business_context_tool
+)
+
+
+BUSINESS_CONTEXT_SYSTEM_PROMPT = """你是 NexusAI 的业务上下文助手。
+
+职责：
+- 只能读取当前用户在 NexusAI 系统内的受控业务上下文。
+- 可用工具会以 function calling 形式提供。
+- 你可以查询账号概览、知识库/文档状态、当前会话、MCP 配置等。
+
+安全规则：
+- 必须基于工具返回结果回答，不要编造。
+- 不要声称可以访问任意数据库或执行 SQL。
+- 不要请求或猜测 user_id、session_id、kb_id，这些由系统运行时注入。
+- 如果工具返回错误或无数据，如实说明。"""
+
+
+def _select_fallback_tool(text: str) -> str:
+    """根据关键词做简单的规则 fallback"""
+    if any(k in text for k in ["账号", "用户", "工作区", "我有多少", "统计", "概览"]):
+        return "get_user_workspace_summary"
+    if any(k in text for k in ["知识库", "文档", "上传", "处理状态", "失败"]):
+        return "get_knowledge_base_overview"
+    if any(k in text for k in ["MCP", "工具配置", "外部工具", "服务"]):
+        return "get_mcp_server_overview"
+    return "get_current_session_summary"
+
+
+def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
+    started_at = time.time()
+    user_input = state.get("user_input", "")
+    instruction = state.get("supervisor_instruction") or user_input
+    session_id = state.get("session_id")
+    user_id = state.get("user_id")
+
+    token_queue = get_queue(session_id)
+    if token_queue:
+        token_queue.put(("meta", {
+            "intent": "business_context",
+            "route_reason": "读取用户业务上下文",
+            "task_plan": state.get("task_plan", [])
+        }))
+
+    llm = get_llm_fast()
+    
+    runtime_context = AgentRuntimeContext(
+        user_id=user_id,
+        session_id=session_id,
+        kb_id=state.get("kb_id"),
+    )
+
+    tools = list_business_context_tools()
+    openai_tools = [t.to_openai_schema() for t in tools]
+
+    messages = state.get("messages", []).copy()
+    if not messages:
+        messages = [{"role": "user", "content": user_input}]
+        
+    messages.insert(0, {"role": "system", "content": BUSINESS_CONTEXT_SYSTEM_PROMPT})
+    if instruction and instruction != user_input:
+         messages.append({"role": "user", "content": f"Supervisor 指令：{instruction}"})
+
+    context_records = []
+    node_tokens = 0
+    final_answer = ""
+    
+    for _ in range(3):
+        resp = llm.complete_with_tools(messages=messages, tools=openai_tools, temperature=0.1)
+        usage = resp.get("usage", {})
+        node_tokens += usage.get("total_tokens", 0)
+
+        content = resp.get("content")
+        tool_calls = resp.get("tool_calls", [])
+
+        if not tool_calls and content:
+            final_answer = content
+            break
+
+        # 处理 function calling
+        if tool_calls:
+            tc = tool_calls[0]
+            tool_name = tc.get("name")
+            arguments = tc.get("arguments_dict", {})
+            # 保持原始 args 用于构造安全的 role="assistant" 消息
+            raw_args = tc.get("arguments", "{}")
+            tc_id = tc.get("id", "call_1")
+            
+            messages.append({"role": "assistant", "tool_calls": [{"id": tc_id, "type": "function", "function": {"name": tool_name, "arguments": raw_args}}]})
+            
+            tool = get_business_context_tool(tool_name)
+            tool_started = time.time()
+            if not tool:
+                tool_result = {"error": f"未知工具: {tool_name}"}
+            else:
+                try:
+                    tool_result = tool.run_with_context(arguments, runtime_context)
+                except Exception as e:
+                    logger.exception(f"[Business Context Agent] 工具执行异常: {e}")
+                    tool_result = {"error": str(e)}
+                    
+            elapsed_ms = int((time.time() - tool_started) * 1000)
+            
+            context_records.append({
+                "name": tool_name,
+                "arguments": arguments,
+                "result": tool_result,
+                "elapsed_ms": elapsed_ms,
+                "error": tool_result.get("error") if isinstance(tool_result, dict) else None
+            })
+            
+            messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result)})
+        else:
+            final_answer = "未能获取有效的业务上下文结果。"
+            break
+            
+    if not final_answer and not context_records:
+        # Fallback
+        tool_name = _select_fallback_tool(user_input)
+        tool = get_business_context_tool(tool_name)
+        tool_started = time.time()
+        try:
+            tool_result = tool.run_with_context({}, runtime_context)
+        except Exception as e:
+            tool_result = {"error": str(e)}
+        elapsed_ms = int((time.time() - tool_started) * 1000)
+        context_records.append({
+            "name": tool_name,
+            "arguments": {},
+            "result": tool_result,
+            "elapsed_ms": elapsed_ms,
+            "error": tool_result.get("error") if isinstance(tool_result, dict) else None
+        })
+        # 用普通 user 消息把工具结果交给模型总结，避免 OpenAI 对孤立 tool message 报错
+        messages.append({"role": "user", "content": f"系统自动获取了上下文数据：\n{tool_result}\n请根据该数据回答用户的原始问题。"})
+        
+        # one more LLM call to summarize
+        resp = llm.complete_with_tools(messages=messages, tools=openai_tools, temperature=0.1)
+        usage = resp.get("usage", {})
+        node_tokens += usage.get("total_tokens", 0)
+        content = resp.get("content")
+        final_answer = content if content else "已查阅业务上下文，请见详细数据。"
+
+    if token_queue and final_answer:
+        token_queue.put(("chunk", final_answer))
+
+    return {
+        "final_answer": final_answer,
+        "retrieved_business_context": context_records,
+        "total_tokens": state.get("total_tokens", 0) + node_tokens,
+        "execution_trace": append_trace(
+            state,
+            "business_context_agent",
+            started_at,
+            input_summary={"user_input": user_input[:80]},
+            output_summary={"context_count": len(context_records), "tokens": node_tokens},
+        )
+    }
