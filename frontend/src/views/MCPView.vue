@@ -16,6 +16,7 @@ const { confirm } = useConfirm()
 
 const servers = ref<MCPServerConfig[]>([])
 const activeServerId = ref<number | null>(null)
+const activeView = ref<'list' | 'details'>('list')
 const activeTools = ref<MCPToolInfo[]>([])
 const loadingTools = ref(false)
 const toolError = ref('')
@@ -37,17 +38,22 @@ const createForm = ref({
 
 onMounted(async () => {
   await fetchServers()
+  if (servers.value.length > 0) {
+    activeView.value = 'list'
+  }
 })
 
 async function fetchServers() {
   servers.value = await mcpApi.listMcpServers()
   if (servers.value.length > 0 && !activeServerId.value) {
     await selectServer(servers.value[0].id)
+    activeView.value = 'list'
   }
 }
 
 async function selectServer(id: number) {
   activeServerId.value = id
+  activeView.value = 'details'
   activeTools.value = []
   toolError.value = ''
   loadingTools.value = true
@@ -276,9 +282,12 @@ function transportColor(t: string): string {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full bg-white dark:bg-zinc-950">
     <!-- 左侧 Server 列表 -->
-    <div class="w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
+    <div 
+      class="w-full md:w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0"
+      :class="{'hidden md:flex': activeServerId !== null && activeView === 'details'}"
+    >
       <div class="p-3 border-b border-gray-200 dark:border-gray-800">
         <button
           class="w-full py-2 px-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 flex items-center justify-center gap-1.5"
@@ -327,16 +336,26 @@ function transportColor(t: string): string {
     </div>
 
     <!-- 右侧：工具清单 -->
-    <div class="flex-1 flex flex-col bg-white dark:bg-gray-950">
+    <div 
+      class="flex-grow flex flex-col bg-white dark:bg-gray-950"
+      :class="{'hidden md:flex': activeServerId === null || activeView === 'list'}"
+    >
       <div v-if="!activeServerId" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
         请选择或新建一个 MCP Server
       </div>
 
       <template v-else>
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-800 space-y-3">
+          <!-- 移动端返回按钮 -->
+          <button
+            @click="activeView = 'list'"
+            class="md:hidden flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 rounded px-2.5 py-1.5 self-start active:scale-95 transition-transform bg-zinc-50 dark:bg-zinc-900"
+          >
+            ← 返回服务器列表
+          </button>
           <!-- 第一行：服务名 & 强制刷新 -->
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
               <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {{ servers.find(s => s.id === activeServerId)?.name }}
               </h2>
@@ -345,7 +364,7 @@ function transportColor(t: string): string {
               </span>
             </div>
             <button 
-              class="text-xs text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-300 flex items-center gap-1.5 py-1 px-2.5 border border-zinc-200 dark:border-zinc-800 rounded-sm hover:bg-zinc-100 dark:hover:bg-primary-900/10 disabled:opacity-50"
+              class="text-xs text-zinc-900 dark:text-zinc-100 dark:text-zinc-100 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-primary-300 flex items-center justify-center gap-1.5 py-1.5 px-2.5 border border-zinc-200 dark:border-zinc-800 rounded-sm hover:bg-zinc-100 dark:hover:bg-primary-900/10 disabled:opacity-50 self-start sm:self-center"
               :disabled="refreshing"
               @click="handleRefreshCache"
             >

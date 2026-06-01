@@ -18,6 +18,7 @@ const { confirm } = useConfirm()
 
 const kb = useKnowledgeStore()
 const activeKbId = ref<number | null>(null)
+const activeView = ref<'list' | 'details'>('list')
 
 const showCreateModal = ref(false)
 const createForm = ref({
@@ -162,11 +163,13 @@ onMounted(async () => {
   await kb.fetchKnowledgeBases()
   if (kb.knowledgeBases.length > 0) {
     await selectKb(kb.knowledgeBases[0].id)
+    activeView.value = 'list'
   }
 })
 
 async function selectKb(id: number) {
   activeKbId.value = id
+  activeView.value = 'details'
   await kb.fetchDocuments(id)
 }
 
@@ -354,9 +357,12 @@ function statusLabel(s: string): string {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full bg-white dark:bg-zinc-950">
     <!-- 左侧：KB 列表 -->
-    <div class="w-72 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
+    <div 
+      class="w-full md:w-72 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0"
+      :class="{'hidden md:flex': activeKbId !== null && activeView === 'details'}"
+    >
       <div class="p-3 border-b border-gray-200 dark:border-gray-800">
         <button
           class="w-full py-2 px-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 flex items-center justify-center gap-1.5"
@@ -402,7 +408,10 @@ function statusLabel(s: string): string {
     </div>
 
     <!-- 右侧：文档管理 -->
-    <div class="flex-1 flex flex-col bg-white dark:bg-gray-950">
+    <div 
+      class="flex-grow flex flex-col bg-white dark:bg-gray-950"
+      :class="{'hidden md:flex': activeKbId === null || activeView === 'list'}"
+    >
       <div v-if="!activeKb" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
         请选择或创建一个知识库
       </div>
@@ -410,6 +419,14 @@ function statusLabel(s: string): string {
       <template v-else>
         <!-- 头部 -->
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+          <!-- 移动端返回按钮 -->
+          <button
+            @click="activeView = 'list'"
+            class="md:hidden mb-4 flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 rounded px-2.5 py-1.5 self-start active:scale-95 transition-transform bg-zinc-50 dark:bg-zinc-900"
+          >
+            ← 返回知识库列表
+          </button>
+
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 truncate">{{ activeKb.name }}</h2>
@@ -500,7 +517,7 @@ function statusLabel(s: string): string {
             </button>
           </div>
 
-          <table v-if="filteredDocuments.length > 0" class="w-full text-sm">
+          <table v-if="filteredDocuments.length > 0" class="hidden md:table w-full text-sm">
             <thead>
               <tr class="text-left text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800">
                 <th class="py-2 pr-3 font-medium">文件名</th>
@@ -513,7 +530,7 @@ function statusLabel(s: string): string {
             </thead>
             <tbody>
               <tr
-                v-for="(d, idx) in kb.documents"
+                v-for="(d, idx) in filteredDocuments"
                 :key="d.id"
                 class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50"
               >
@@ -557,6 +574,57 @@ function statusLabel(s: string): string {
               </tr>
             </tbody>
           </table>
+
+          <!-- 移动端卡片式流布局 -->
+          <div v-if="filteredDocuments.length > 0" class="md:hidden space-y-3">
+            <div
+              v-for="d in filteredDocuments"
+              :key="d.id"
+              class="bg-zinc-50/50 dark:bg-zinc-900/30 border border-zinc-200/60 dark:border-zinc-800/80 rounded p-4 flex flex-col gap-2 hover:border-zinc-400 dark:hover:border-zinc-700 transition-all"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <span class="text-sm font-semibold text-zinc-800 dark:text-zinc-200 truncate flex-1" :title="d.file_name">
+                  {{ d.file_name }}
+                </span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold flex-shrink-0" :class="statusColor(d.status)">
+                  {{ statusLabel(d.status) }}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                <span class="uppercase font-medium">{{ d.file_type }}</span>
+                <span>·</span>
+                <span>{{ fileSize(d.file_size) }}</span>
+                <span>·</span>
+                <span>{{ d.chunk_count }} 个分块</span>
+              </div>
+
+              <div class="flex items-center justify-end gap-3.5 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/60 mt-1">
+                <button
+                  class="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 disabled:opacity-40"
+                  :disabled="d.status !== 'completed'"
+                  @click="openChunksPreview(d)"
+                >
+                  <Eye :size="13" />
+                  <span>预览</span>
+                </button>
+                <button
+                  v-if="d.status === 'failed' || d.status === 'completed'"
+                  class="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  @click="handleReprocessDoc(d)"
+                >
+                  <RotateCcw :size="13" />
+                  <span>重试/重新处理</span>
+                </button>
+                <button
+                  class="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  @click="handleDeleteDoc(d.id)"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          </div>
           <div v-else class="text-center text-sm text-gray-400 dark:text-gray-500 py-12">
             还没有文档，点击上方按钮上传
           </div>

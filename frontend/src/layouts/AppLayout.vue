@@ -59,11 +59,11 @@ const navItems: NavItem[] = [
 
 <template>
   <div class="flex h-screen bg-white dark:bg-zinc-950 relative font-sans text-zinc-900 dark:text-zinc-100">
-    <div class="w-16 flex-shrink-0"></div>
+    <div class="hidden md:block w-16 flex-shrink-0"></div>
 
-    <!-- 侧栏：去除毛玻璃，使用实体纯色底色与细边框 -->
+    <!-- 侧栏：桌面端显示，移动端隐藏 -->
     <aside
-      class="absolute top-0 left-0 h-screen bg-zinc-50 dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex flex-col z-40 transition-all duration-300 overflow-hidden"
+      class="hidden md:flex absolute top-0 left-0 h-screen bg-zinc-50 dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col z-40 transition-all duration-300 overflow-hidden"
       :class="hovered ? 'w-56 shadow-2xl shadow-zinc-200/50 dark:shadow-black/50' : 'w-16'"
       @mouseenter="hovered = true"
       @mouseleave="hovered = false"
@@ -163,8 +163,28 @@ const navItems: NavItem[] = [
       </div>
     </aside>
 
-    <!-- 主区域 -->
-    <main class="flex-1 overflow-hidden relative z-10 bg-white dark:bg-zinc-950">
+    <!-- 移动端极简底部导航栏：HSL毛玻璃与半透质感 -->
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-zinc-50/90 dark:bg-zinc-950/90 backdrop-blur-md border-t border-zinc-200/50 dark:border-zinc-800/50 flex items-center justify-around z-40 px-2 shadow-lg">
+      <RouterLink
+        v-for="item in navItems"
+        :key="item.to"
+        :to="item.to"
+        class="flex flex-col items-center justify-center flex-1 h-full text-zinc-400 dark:text-zinc-500 select-none active:scale-95 transition-transform"
+        :class="route.path.startsWith(item.to) ? 'text-zinc-950 dark:text-zinc-50' : 'hover:text-zinc-700 dark:hover:text-zinc-300'"
+      >
+        <component
+          :is="item.icon"
+          :size="18"
+          :stroke-width="route.path.startsWith(item.to) ? 2.5 : 2"
+        />
+        <span class="text-[9px] font-bold mt-1 tracking-tight">
+          {{ item.label }}
+        </span>
+      </RouterLink>
+    </nav>
+
+    <!-- 主区域：移动端预留底部导航栏高度 -->
+    <main class="flex-1 overflow-hidden relative z-10 bg-white dark:bg-zinc-950 pb-14 md:pb-0">
       <RouterView />
     </main>
   </div>

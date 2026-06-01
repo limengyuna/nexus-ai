@@ -281,8 +281,8 @@ async function rejectPref(candidateId: number) {
 <template>
   <div class="h-full flex flex-col bg-zinc-50 dark:bg-zinc-950 font-sans">
     <!-- 顶部高端工业风标题栏 -->
-    <header class="flex-shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-8 py-5">
-      <div class="flex items-center justify-between">
+    <header class="flex-shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 md:px-8 py-4 md:py-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 flex items-center justify-center shadow-sm">
             <Brain :size="20" :stroke-width="2" />
@@ -296,7 +296,7 @@ async function rejectPref(candidateId: number) {
         </div>
         <button
           @click="loadData"
-          class="flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors duration-200 border border-zinc-200 dark:border-zinc-800"
+          class="flex items-center justify-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors duration-200 border border-zinc-200 dark:border-zinc-800 self-start sm:self-center"
         >
           <RefreshCw :size="15" :stroke-width="2" />
           <span>刷新数据</span>
@@ -304,7 +304,7 @@ async function rejectPref(candidateId: number) {
       </div>
 
       <!-- 锌灰极简三 Tab 导航设计 -->
-      <div class="flex items-center gap-1.5 mt-5 border-b border-zinc-100 dark:border-zinc-800/60 pb-1">
+      <div class="flex flex-wrap items-center gap-1.5 mt-5 border-b border-zinc-100 dark:border-zinc-800/60 pb-1">
         <button
           @click="switchTab('facts')"
           class="relative px-4 py-2 text-sm font-medium transition-all duration-200"
@@ -345,13 +345,13 @@ async function rejectPref(candidateId: number) {
     </header>
 
     <!-- 主展示区 -->
-    <div class="flex-1 overflow-y-auto px-8 py-6">
+    <div class="flex-1 overflow-y-auto px-4 md:px-8 py-5 md:py-6">
       
       <!-- ==================== TAB 1: 长期记忆事实 ==================== -->
       <div v-if="activeTab === 'facts'" class="h-full flex flex-col">
         <!-- 范围筛选与类型过滤 -->
-        <div class="flex items-center gap-2 mb-6">
-          <div class="flex items-center gap-1 mr-2 pr-3 border-r border-zinc-200 dark:border-zinc-700">
+        <div class="flex flex-wrap items-center gap-2 mb-6">
+          <div class="flex flex-wrap items-center gap-1 mr-2 pr-3 border-r border-zinc-200 dark:border-zinc-700">
             <button
               @click="switchScope('all')"
               class="px-2.5 py-1 rounded text-xs font-medium transition-all duration-200"
@@ -515,7 +515,7 @@ async function rejectPref(candidateId: number) {
             </div>
 
             <!-- 分组卡片列表 -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div 
                 v-for="slot in groupedSlots[catVal]" 
                 :key="slot.key"

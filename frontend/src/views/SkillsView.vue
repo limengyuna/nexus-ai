@@ -21,6 +21,7 @@ const kb = useKnowledgeStore()
 const skills = ref<SkillInfo[]>([])
 const loading = ref(false)
 const activeName = ref<string | null>(null)
+const activeView = ref<'list' | 'details'>('list')
 const activeSkill = ref<SkillInfo | null>(null)
 
 // 测试区状态
@@ -49,6 +50,7 @@ onMounted(async () => {
   await Promise.all([fetchSkills(), kb.fetchKnowledgeBases()])
   if (skills.value.length > 0) {
     selectSkill(skills.value[0].name)
+    activeView.value = 'list'
   }
   // 默认选第一个 KB
   if (kb.knowledgeBases.length > 0 && testKbId.value === null) {
@@ -73,6 +75,7 @@ function selectSkill(name: string) {
   testResult.value = null
   // 自动填入示例输入
   testInput.value = SAMPLE_INPUT[name] ?? ''
+  activeView.value = 'details'
 }
 
 async function handleTest() {
@@ -102,9 +105,12 @@ async function handleTest() {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full bg-white dark:bg-zinc-950">
     <!-- 左侧：Skill 列表 -->
-    <div class="w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
+    <div 
+      class="w-full md:w-80 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0"
+      :class="{'hidden md:flex': activeName !== null && activeView === 'details'}"
+    >
       <div class="p-4 border-b border-gray-200 dark:border-gray-800">
         <h2 class="text-sm font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
           <Sparkles :size="16" class="text-zinc-900 dark:text-zinc-100 dark:text-zinc-100" />
@@ -159,7 +165,10 @@ async function handleTest() {
     </div>
 
     <!-- 右侧：详情区 -->
-    <div class="flex-1 flex flex-col bg-white dark:bg-gray-950">
+    <div 
+      class="flex-grow flex flex-col bg-white dark:bg-gray-950"
+      :class="{'hidden md:flex': activeSkill === null || activeView === 'list'}"
+    >
       <div v-if="!activeSkill" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
         请选择一个 Skill 查看详情
       </div>
@@ -167,6 +176,13 @@ async function handleTest() {
       <template v-else>
         <!-- 头部 -->
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+          <!-- 移动端返回按钮 -->
+          <button
+            @click="activeView = 'list'"
+            class="md:hidden mb-4 flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 rounded px-2.5 py-1.5 self-start active:scale-95 transition-transform bg-zinc-50 dark:bg-zinc-900"
+          >
+            ← 返回技能列表
+          </button>
           <h2 class="text-lg font-mono font-semibold text-gray-800 dark:text-gray-100">{{ activeSkill.name }}</h2>
           <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">{{ activeSkill.description }}</p>
         </div>
@@ -245,7 +261,7 @@ async function handleTest() {
               @keydown.enter="handleTest"
             />
             <button
-              class="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 dark:text-zinc-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 flex-shrink-0"
               :disabled="testing || !testInput.trim()"
               @click="handleTest"
             >
