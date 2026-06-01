@@ -13,6 +13,7 @@ from app.models.chat import ChatSession, ChatMessage, MessageRole, AgentSource
 from app.models.task import TaskRecord, TaskStatus, TaskType
 from app.models.mcp_server import MCPServerConfig, MCPTransportType
 from app.models.memory import MemoryFact, MemoryFactType
+from app.models.memory_profile import MemorySlot, UserMemorySlotValue, MemoryCandidate
 
 __all__ = [
     # Mixin
@@ -34,6 +35,10 @@ __all__ = [
     # 记忆事实
     "MemoryFact",
     "MemoryFactType",
+    # 结构化记忆档案
+    "MemorySlot",
+    "UserMemorySlotValue",
+    "MemoryCandidate",
     # 异步任务
     "TaskRecord",
     "TaskStatus",

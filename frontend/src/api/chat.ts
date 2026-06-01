@@ -69,6 +69,12 @@ export interface BusinessContextRecord {
   error: string | null
 }
 
+export interface ProfileSlotRecord {
+  slot_key: string
+  slot_type: string
+  slot_value: any
+}
+
 export interface FaithfulnessClaim {
   text: string           // 从回答中提取的事实声明
   supported: boolean     // 是否有资料支撑
@@ -93,6 +99,7 @@ export interface ChatResponse {
   retrieved_docs: RetrievedDoc[]
   retrieved_memories: RetrievedMemory[]
   retrieved_business_context: BusinessContextRecord[]
+  injected_profile_slots: ProfileSlotRecord[]
   execution_trace: TraceStep[]
 }
 
@@ -187,6 +194,7 @@ export interface StreamHandlers {
     retrieved_docs: RetrievedDoc[]
     retrieved_memories: RetrievedMemory[]
     retrieved_business_context: BusinessContextRecord[]
+    injected_profile_slots: ProfileSlotRecord[]
     task_plan: any[]
     faithfulness: FaithfulnessResult | null
     token_usage: number

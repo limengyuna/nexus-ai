@@ -12,6 +12,8 @@ from app.core.database import SessionLocal
 from app.models.chat import ChatMessage
 from app.memory.extractor import MemoryExtractor
 from app.memory.store import MemoryStore
+from app.memory.profile_extractor import ProfileExtractor
+from app.memory.profile_store import MemoryProfileStore
 
 
 def _extract_error_facts_worker(
@@ -222,6 +224,147 @@ def start_async_extract_turn_facts(
     thread = threading.Thread(
         target=_extract_turn_facts_worker,
         args=(user_id, session_id, user_input, assistant_answer, kb_id),
+        daemon=True
+    )
+    thread.start()
+
+
+def _extract_profile_slots_worker(
+    user_id: int,
+    session_id: int,
+    user_input: str,
+    assistant_answer: str,
+    source_message_id: int | None = None,
+    kb_id: int | None = None
+) -> None:
+    """自动提取结构化偏好与候选记忆的后台子线程"""
+    logger.info("[Memory Tasks] 开始后台自动提取结构化偏好... (user_id={}, session_id={})", user_id, session_id)
+    db = SessionLocal()
+    try:
+        # 1. 查询当前所有激活的槽位
+        active_slots = MemoryProfileStore.list_active_slots(db)
+        if not active_slots:
+            logger.warning("[Memory Tasks] 系统中没有激活的 Memory Slots，跳过提取")
+            return
+
+        # 转换为字典列表以保障线程安全
+        slots_definitions = []
+        for s in active_slots:
+            slots_definitions.append({
+                "slot_key": s.slot_key,
+                "value_type": s.value_type,
+                "description": s.description,
+                "allowed_values": s.allowed_values
+            })
+
+        # 2. 查询当前用户已生效的档案
+        user_vals = MemoryProfileStore.get_user_profile(db, user_id)
+        current_profile = {}
+        for val in user_vals:
+            slot = next((s for s in active_slots if s.id == val.slot_id), None)
+            if slot:
+                current_profile[slot.slot_key] = val.slot_value
+
+        # 3. 调用 LLM 抽取器
+        result = ProfileExtractor.extract(user_input, assistant_answer, slots_definitions, current_profile)
+        updates = result.get("updates", [])
+        candidates = result.get("candidates", [])
+
+        # 4. 处理更新 (updates)
+        saved_updates = 0
+        for upd in updates:
+            slot_key = upd.get("slot_key")
+            slot_value = upd.get("slot_value")
+            confidence = upd.get("confidence", 0.8)
+            source = upd.get("source", "inferred")
+            reason = upd.get("reason", "")
+
+            # 阈值过滤
+            is_valid = False
+            if source == "explicit" and confidence >= 0.75:
+                is_valid = True
+            elif source == "inferred" and confidence >= 0.85:
+                is_valid = True
+
+            if is_valid:
+                res = MemoryProfileStore.upsert_slot_value(
+                    db=db,
+                    user_id=user_id,
+                    slot_key=slot_key,
+                    slot_value=slot_value,
+                    confidence=confidence,
+                    source=source,
+                    source_session_id=session_id,
+                    source_message_id=source_message_id,
+                    updated_by="assistant"
+                )
+                if res:
+                    saved_updates += 1
+            else:
+                # 达不到置信度阈值，作为候选写入
+                MemoryProfileStore.create_candidate(
+                    db=db,
+                    user_id=user_id,
+                    candidate_text=f"用户表达的槽位 {slot_key} 为: {slot_value}。原因: {reason}",
+                    suggested_slot_key=slot_key,
+                    suggested_value=slot_value,
+                    reason=f"自动提取的偏好置信度不足（源: {source}, 置信度: {confidence}）: {reason}",
+                    confidence=confidence,
+                    source_session_id=session_id,
+                    source_message_id=source_message_id
+                )
+
+        # 5. 处理候选偏好 (candidates)
+        saved_candidates = 0
+        for cand in candidates:
+            candidate_text = cand.get("candidate_text")
+            suggested_slot_key = cand.get("suggested_slot_key")
+            suggested_value = cand.get("suggested_value")
+            confidence = cand.get("confidence", 0.5)
+            reason = cand.get("reason", "")
+
+            # 过滤超低置信度数据以防垃圾数据
+            if confidence >= 0.6:
+                MemoryProfileStore.create_candidate(
+                    db=db,
+                    user_id=user_id,
+                    candidate_text=candidate_text,
+                    suggested_slot_key=suggested_slot_key,
+                    suggested_value=suggested_value,
+                    reason=reason,
+                    confidence=confidence,
+                    source_session_id=session_id,
+                    source_message_id=source_message_id
+                )
+                saved_candidates += 1
+
+        logger.info(
+            "[Memory Tasks] 自动偏好提取处理完毕。成功写入槽位 {}/{} 条，候选写入 {} 条",
+            saved_updates, len(updates), saved_candidates
+        )
+    except Exception as e:
+        logger.exception("[Memory Tasks] 运行后台偏好自动提取任务失败: {}", e)
+    finally:
+        db.close()
+
+
+def start_async_extract_profile_slots(
+    user_id: int,
+    session_id: int,
+    user_input: str,
+    assistant_answer: str,
+    source_message_id: int | None = None,
+    kb_id: int | None = None
+) -> None:
+    """
+    触发异步任务：从当前轮对话中提取并更新用户偏好槽位或写入候选区。
+    """
+    if not user_input or not assistant_answer:
+        return
+
+    thread = threading.Thread(
+        target=_extract_profile_slots_worker,
+        args=(user_id, session_id, user_input, assistant_answer, source_message_id, kb_id),
         daemon=True
     )
     thread.start()

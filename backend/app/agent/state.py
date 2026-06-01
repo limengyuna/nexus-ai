@@ -111,6 +111,9 @@ class AgentState(TypedDict, total=False):
 
     # ---------- L2 Memory 事实库 ----------
     retrieved_memories: List[RetrievedMemory]   # 检索到的历史事实记忆
+    
+    # ---------- User Profile Slots ----------
+    injected_profile_slots: Annotated[List[Dict[str, Any]], operator.add] # 注入的结构化长期偏好
 
     # ---------- Tool / Skill ----------
     tool_calls: List[ToolCallRecord]           # 本轮所有工具/技能调用记录
@@ -168,6 +171,7 @@ def make_initial_state(
         retrieved_docs=[],
         faithfulness={},
         retrieved_memories=[],
+        injected_profile_slots=[],
         tool_calls=[],
         skill_used=None,
         final_answer="",

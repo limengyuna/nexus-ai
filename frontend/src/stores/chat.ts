@@ -15,6 +15,7 @@ import type {
   RetrievedDoc,
   RetrievedMemory,
   BusinessContextRecord,
+  ProfileSlotRecord,
   ToolCall,
   TraceStep,
 } from '@/api/chat'
@@ -40,6 +41,7 @@ function saveThinkingTrace(
     retrieved_docs: RetrievedDoc[]
     retrieved_memories?: RetrievedMemory[]
     retrieved_business_context?: BusinessContextRecord[]
+    injected_profile_slots?: ProfileSlotRecord[]
     task_plan?: any[] // 新增执行计划字段
     decisions?: DecisionEntry[] // 新增决策历史字段
     faithfulness?: FaithfulnessResult | null // 忠实性校验结果
@@ -71,6 +73,7 @@ function saveThinkingTrace(
       retrievedDocs: data.retrieved_docs,
       retrievedMemories: data.retrieved_memories || [],
       retrievedBusinessContext: data.retrieved_business_context || [],
+      injectedProfileSlots: data.injected_profile_slots || [],
       taskPlan: data.task_plan || [], // 新增持久化存储执行计划
       decisions: data.decisions || [], // 新增持久化存储决策历史
       faithfulness: data.faithfulness || null, // 忠实性校验结果
@@ -131,6 +134,7 @@ export const useChatStore = defineStore('chat', () => {
   const lastRetrievedDocs = ref<RetrievedDoc[]>([])
   const lastRetrievedMemories = ref<RetrievedMemory[]>([])
   const lastRetrievedBusinessContext = ref<BusinessContextRecord[]>([])
+  const lastInjectedProfileSlots = ref<ProfileSlotRecord[]>([])
   const lastFaithfulness = ref<FaithfulnessResult | null>(null)
   const activeThinkingMessageId = ref<number | null>(null)
 
@@ -168,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
         lastRetrievedDocs.value = snapshot.retrievedDocs || []
         lastRetrievedMemories.value = snapshot.retrievedMemories || []
         lastRetrievedBusinessContext.value = snapshot.retrievedBusinessContext || []
+        lastInjectedProfileSlots.value = snapshot.injectedProfileSlots || []
         lastFaithfulness.value = snapshot.faithfulness || null
         lastTaskPlan.value = snapshot.taskPlan || [] // 恢复加载本地存储的执行计划
         lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
@@ -198,6 +203,7 @@ export const useChatStore = defineStore('chat', () => {
           lastRetrievedDocs.value = snapshot.retrievedDocs || []
           lastRetrievedMemories.value = snapshot.retrievedMemories || []
           lastRetrievedBusinessContext.value = snapshot.retrievedBusinessContext || []
+          lastInjectedProfileSlots.value = snapshot.injectedProfileSlots || []
           lastFaithfulness.value = snapshot.faithfulness || null
           lastTaskPlan.value = snapshot.taskPlan || [] // 切换消息时，恢复加载对应执行计划
           lastDecisions.value = snapshot.decisions || [] // 恢复决策历史
@@ -298,6 +304,7 @@ export const useChatStore = defineStore('chat', () => {
       lastRetrievedDocs.value = resp.retrieved_docs
       lastRetrievedMemories.value = resp.retrieved_memories || []
       lastRetrievedBusinessContext.value = resp.retrieved_business_context || []
+      lastInjectedProfileSlots.value = resp.injected_profile_slots || []
       // 非流式只能拿到最终一次决策，构造单元素历史列表
       lastDecisions.value = resp.intent && resp.route_reason
         ? [{ intent: resp.intent, routeReason: resp.route_reason, timestamp: Date.now() }]
@@ -315,6 +322,7 @@ export const useChatStore = defineStore('chat', () => {
         retrieved_docs: resp.retrieved_docs,
         retrieved_memories: resp.retrieved_memories,
         retrieved_business_context: resp.retrieved_business_context,
+        injected_profile_slots: resp.injected_profile_slots,
         decisions: lastDecisions.value, // 持久化决策历史
       })
 
@@ -416,6 +424,7 @@ export const useChatStore = defineStore('chat', () => {
           lastRetrievedDocs.value = data.retrieved_docs
           lastRetrievedMemories.value = data.retrieved_memories || []
           lastRetrievedBusinessContext.value = data.retrieved_business_context || []
+          lastInjectedProfileSlots.value = data.injected_profile_slots || []
           lastFaithfulness.value = data.faithfulness || null
           // 更新 task_plan 为最终完整状态
           if (data.task_plan && data.task_plan.length > 0) {
@@ -433,6 +442,7 @@ export const useChatStore = defineStore('chat', () => {
               retrieved_docs: data.retrieved_docs,
               retrieved_memories: data.retrieved_memories,
               retrieved_business_context: data.retrieved_business_context,
+              injected_profile_slots: data.injected_profile_slots,
               task_plan: lastTaskPlan.value, // 完美传入最新执行计划
               decisions: lastDecisions.value, // 持久化决策历史
               faithfulness: lastFaithfulness.value, // 忠实性校验结果
@@ -521,6 +531,7 @@ export const useChatStore = defineStore('chat', () => {
     lastRetrievedDocs.value = []
     lastRetrievedMemories.value = []
     lastRetrievedBusinessContext.value = []
+    lastInjectedProfileSlots.value = []
     lastFaithfulness.value = null
     activeThinkingMessageId.value = null
   }
@@ -596,6 +607,7 @@ export const useChatStore = defineStore('chat', () => {
           lastRetrievedDocs.value = data.retrieved_docs
           lastRetrievedMemories.value = data.retrieved_memories || []
           lastRetrievedBusinessContext.value = data.retrieved_business_context || []
+          lastInjectedProfileSlots.value = data.injected_profile_slots || []
           lastFaithfulness.value = data.faithfulness || null
           if (data.task_plan?.length) lastTaskPlan.value = data.task_plan
           if (activeSessionId.value) {
@@ -608,6 +620,7 @@ export const useChatStore = defineStore('chat', () => {
               retrieved_docs: data.retrieved_docs,
               retrieved_memories: data.retrieved_memories,
               retrieved_business_context: data.retrieved_business_context,
+              injected_profile_slots: data.injected_profile_slots,
               task_plan: lastTaskPlan.value,
               decisions: lastDecisions.value,
               faithfulness: lastFaithfulness.value,
@@ -644,6 +657,7 @@ export const useChatStore = defineStore('chat', () => {
     lastRetrievedDocs,
     lastRetrievedMemories,
     lastRetrievedBusinessContext,
+    lastInjectedProfileSlots,
     lastFaithfulness,
     activeThinkingMessageId,
     fetchSessions,

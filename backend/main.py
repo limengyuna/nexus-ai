@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from app.api import auth, chat, document, health, knowledge_base, mcp, skill, task, memory, internal
+from app.api import auth, chat, document, health, knowledge_base, mcp, skill, task, memory, internal, memory_profile
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import setup_logging
@@ -45,6 +45,18 @@ async def lifespan(app: FastAPI):
     logger.info("监听: {}:{}", settings.APP_HOST, settings.APP_PORT)
     logger.info("调试模式: {}", settings.APP_DEBUG)
     logger.info("=" * 60)
+    
+    # 初始化 Memory Profile Slots
+    from app.core.database import SessionLocal
+    from app.memory.profile_store import MemoryProfileStore
+    try:
+        db = SessionLocal()
+        MemoryProfileStore.init_default_slots(db)
+        logger.info("系统预设的 Profile Slots 初始化完成。")
+    except Exception as e:
+        logger.error(f"初始化 Profile Slots 失败: {e}")
+    finally:
+        db.close()
 
     yield  # 应用运行期间
 
@@ -102,6 +114,7 @@ app.include_router(chat.router, prefix=API_PREFIX)
 app.include_router(mcp.router, prefix=API_PREFIX)
 app.include_router(skill.router, prefix=API_PREFIX)
 app.include_router(memory.router, prefix=API_PREFIX)
+app.include_router(memory_profile.router, prefix=API_PREFIX)
 # 内部工具（面试 QA 导出等）
 app.include_router(internal.router, prefix=API_PREFIX)
 

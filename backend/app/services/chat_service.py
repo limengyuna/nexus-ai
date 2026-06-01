@@ -348,6 +348,20 @@ class ChatService:
         except Exception as e:
             logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
 
+        # 触发 Profile 槽位提取：异步提取结构化用户偏好
+        try:
+            from app.memory.tasks import start_async_extract_profile_slots
+            start_async_extract_profile_slots(
+                user_id=session.user_id,
+                session_id=session.id,
+                user_input=user_input,
+                assistant_answer=answer,
+                source_message_id=assistant_msg.id,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] 异步触发 Profile 槽位提取失败: {}", e)
+
         # 异步触发摘要压缩（移到回复后执行，避免阻塞首字响应）
         ChatService._compress_async(session.id)
 
@@ -620,6 +634,20 @@ class ChatService:
         except Exception as e:
             logger.error("[Memory Integration] 异步触发每轮事实抽取失败: {}", e)
 
+        # 触发 Profile 槽位提取：异步提取结构化用户偏好
+        try:
+            from app.memory.tasks import start_async_extract_profile_slots
+            start_async_extract_profile_slots(
+                user_id=session.user_id,
+                session_id=session.id,
+                user_input=user_input,
+                assistant_answer=answer,
+                source_message_id=assistant_msg.id,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] 异步触发 Profile 槽位提取失败: {}", e)
+
         # 异步触发摘要压缩（移到回复后执行，避免阻塞首字响应）
         ChatService._compress_async(session.id)
 
@@ -642,6 +670,9 @@ class ChatService:
         retrieved_business_context = json.loads(
             json.dumps(final_state.get("retrieved_business_context", []), default=str)
         )
+        injected_profile_slots = json.loads(
+            json.dumps(final_state.get("injected_profile_slots", []), default=str)
+        )
         yield (
             "done",
             {
@@ -652,6 +683,7 @@ class ChatService:
                 "retrieved_docs": retrieved_docs,
                 "retrieved_memories": retrieved_memories,
                 "retrieved_business_context": retrieved_business_context,
+                "injected_profile_slots": injected_profile_slots,
                 "task_plan": task_plan,
                 "faithfulness": faithfulness,
                 "token_usage": final_state.get("total_tokens", 0) or 0,
@@ -819,6 +851,20 @@ class ChatService:
         except Exception as e:
             logger.error("[Memory Integration] resume 异步触发每轮事实失败: {}", e)
 
+        # 触发 Profile 槽位提取：异步提取结构化用户偏好
+        try:
+            from app.memory.tasks import start_async_extract_profile_slots
+            start_async_extract_profile_slots(
+                user_id=session.user_id,
+                session_id=session.id,
+                user_input=user_input,
+                assistant_answer=answer,
+                source_message_id=assistant_msg.id,
+                kb_id=session.kb_id
+            )
+        except Exception as e:
+            logger.error("[Memory Integration] resume 异步触发 Profile 槽位提取失败: {}", e)
+
         # 发送 done
         yield (
             "done",
@@ -837,6 +883,9 @@ class ChatService:
                 ),
                 "retrieved_business_context": json.loads(
                     json.dumps(final_state.get("retrieved_business_context", []), default=str)
+                ),
+                "injected_profile_slots": json.loads(
+                    json.dumps(final_state.get("injected_profile_slots", []), default=str)
                 ),
                 "task_plan": json.loads(
                     json.dumps(final_state.get("task_plan", []), default=str)
