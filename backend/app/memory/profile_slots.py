@@ -2,6 +2,12 @@
 系统预置的结构化档案 (Profile Slots) 槽位定义。
 """
 
+DEPRECATED_MEMORY_SLOT_KEYS = {
+    "agent.autonomy_level",
+    "knowledge.answer_grounding_requirement",
+    "tool.approval_sensitivity",
+}
+
 DEFAULT_MEMORY_SLOTS = [
     # profile
     {
@@ -32,13 +38,6 @@ DEFAULT_MEMORY_SLOTS = [
         "description": "回答的详细程度",
     },
     {
-        "slot_key": "agent.autonomy_level",
-        "slot_type": "agent",
-        "value_type": "enum",
-        "allowed_values": ["conservative", "ask_first", "proactive"],
-        "description": "代理的自主执行水平",
-    },
-    {
         "slot_key": "agent.clarification_preference",
         "slot_type": "agent",
         "value_type": "enum",
@@ -51,19 +50,6 @@ DEFAULT_MEMORY_SLOTS = [
         "slot_type": "knowledge",
         "value_type": "string",
         "description": "回答是否需要引用来源，及引用风格",
-    },
-    {
-        "slot_key": "knowledge.answer_grounding_requirement",
-        "slot_type": "knowledge",
-        "value_type": "boolean",
-        "description": "是否要求“无依据不回答”",
-    },
-    # tool
-    {
-        "slot_key": "tool.approval_sensitivity",
-        "slot_type": "tool",
-        "value_type": "string",
-        "description": "高风险工具是否必须人工确认的规则",
     },
     # output
     {

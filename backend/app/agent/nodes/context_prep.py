@@ -79,11 +79,6 @@ def context_prep_node(state: AgentState) -> Dict[str, Any]:
             if any(kw in input_lower for kw in format_keywords):
                 active_slot_keys.add("output.default_format")
                 
-            # 工具/安全确认激活
-            tool_keywords = ["执行", "运行", "工具", "审批", "确认", "审核", "敏感", "安全", "run", "tool", "exec", "approve"]
-            if any(kw in input_lower for kw in tool_keywords):
-                active_slot_keys.add("tool.approval_sensitivity")
-                
             # 硬性规则与敏感度约束激活
             constraint_keywords = ["禁止", "严禁", "不允许", "不要", "必须", "绝对", "脱敏", "隐私", "数据", "敏感", "规则", "约束", "rule", "constraint", "must", "never", "privacy", "sensitive"]
             if any(kw in input_lower for kw in constraint_keywords):
@@ -170,4 +165,3 @@ def context_prep_node(state: AgentState) -> Dict[str, Any]:
             },
         ),
     }
-

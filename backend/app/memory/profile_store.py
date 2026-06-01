@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, delete
 
 from app.models.memory_profile import MemorySlot, UserMemorySlotValue, MemoryCandidate
-from app.memory.profile_slots import DEFAULT_MEMORY_SLOTS
+from app.memory.profile_slots import DEFAULT_MEMORY_SLOTS, DEPRECATED_MEMORY_SLOT_KEYS
 
 
 class MemoryProfileStore:
@@ -21,9 +21,16 @@ class MemoryProfileStore:
                 existing.value_type = slot_data.get("value_type", "string")
                 existing.description = slot_data.get("description")
                 existing.allowed_values = slot_data.get("allowed_values")
+                existing.is_active = True
             else:
                 new_slot = MemorySlot(**slot_data)
                 db.add(new_slot)
+        if DEPRECATED_MEMORY_SLOT_KEYS:
+            deprecated_slots = db.execute(
+                select(MemorySlot).where(MemorySlot.slot_key.in_(DEPRECATED_MEMORY_SLOT_KEYS))
+            ).scalars().all()
+            for slot in deprecated_slots:
+                slot.is_active = False
         db.commit()
 
     @staticmethod
