@@ -34,10 +34,10 @@ async def lifespan(app: FastAPI):
     """
     应用生命周期管理
 
-    启动时：初始化日志、打印配置信息
-    关闭时：清理资源（暂无）
+    启动时：初始化日志、打印配置信息、预加载核心资源（消除冷启动）
+    关闭时：清理资源
     """
-    # ---------- 启动 ----------
+    # ---------- 1. 启动时的同步预热（必须在 yield 之前） ----------
     setup_logging()
     logger.info("=" * 60)
     logger.info("{} 启动中...", settings.APP_NAME)
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     logger.info("调试模式: {}", settings.APP_DEBUG)
     logger.info("=" * 60)
     
-    # 初始化 Memory Profile Slots
+    # 0. 初始化 Memory Profile Slots
     from app.core.database import SessionLocal
     from app.memory.profile_store import MemoryProfileStore
     try:
@@ -58,9 +58,74 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # 1. 预编译 LangGraph 主图与 PostgresSaver 数据库连接池
+    try:
+        from app.agent.graph import get_agent_graph
+        get_agent_graph()
+        logger.info("[Pre-warm] LangGraph 核心流主图预编译成功（数据库 checkpointer 连接池已建立）。")
+    except Exception as e:
+        logger.error(f"[Pre-warm] 预编译 LangGraph 主图失败: {e}")
+
+    # 2. 预加载并建立 ChromaDB 客户端物理连接
+    try:
+        from app.rag.vector_store import get_vector_store
+        get_vector_store()
+        logger.info("[Pre-warm] ChromaDB 向量数据库客户端加载与连接完成。")
+    except Exception as e:
+        logger.error(f"[Pre-warm] 预热 ChromaDB 失败: {e}")
+
+    # 3. 预加载 Embedding 向量化模型管理器
+    try:
+        from app.rag.embedder import get_embedder
+        get_embedder()
+        logger.info("[Pre-warm] Embedding 向量化模型客户端初始化完成。")
+    except Exception as e:
+        logger.error(f"[Pre-warm] 预热 Embedding 失败: {e}")
+
+    # 4. 预实例化双模型 LLM 客户端
+    try:
+        from app.agent.llm import get_llm, get_llm_fast
+        get_llm()
+        get_llm_fast()
+        logger.info("[Pre-warm] 双大语言模型 LLM 客户端初始化完成。")
+    except Exception as e:
+        logger.error(f"[Pre-warm] 预加载 LLM 客户端失败: {e}")
+
+    # ---------- 2. 启动时的后台非阻塞异步预热（同样在 yield 之前，但异步运行不阻碍主线程） ----------
+
+    # 5. 后台线程预加载 jieba 中文分词库字典
+    # 💡 线程瞬间拉起并返回，不阻塞主服务对外监听
+    def _warmup_jieba():
+        try:
+            import jieba
+            jieba.initialize()
+            logger.info("[Pre-warm] jieba 中文分词库字典后台加载完成。")
+        except Exception as e:
+            logger.error(f"[Pre-warm] 预热 jieba 词典失败: {e}")
+
+    import threading
+    threading.Thread(target=_warmup_jieba, daemon=True).start()
+
+    # 6. 后台异步协程预热外部 API 网络连接通道（TLS/SSL 保持握手）
+    # 💡 create_task 瞬间注册并返回，不阻塞主进程 yield！
+    async def _warmup_llm_network():
+        try:
+            from app.agent.llm import get_llm_fast
+            llm = get_llm_fast()
+            await asyncio.to_thread(
+                llm.complete,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1
+            )
+            logger.info("[Pre-warm] LLM 外部 API 网络通道 (TLS/SSL 保持连接池) 后台预热就绪。")
+        except Exception as e:
+            logger.warning(f"[Pre-warm] LLM 网络连接通道后台预热失败（不影响主业务）: {e}")
+
+    asyncio.create_task(_warmup_llm_network())
+
     yield  # 应用运行期间
 
-    # ---------- 关闭 ----------
+    # ---------- 3. 关闭时（应用真正退出时执行，yield 之后） ----------
     logger.info("{} 已停止", settings.APP_NAME)
 
 
