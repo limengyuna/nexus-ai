@@ -4,7 +4,7 @@
  */
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Loader2 } from 'lucide-vue-next'
+import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import { register } from '@/api/auth'
@@ -18,6 +18,7 @@ const auth = useAuthStore()
 const mode = ref<'login' | 'register'>('login')
 const username = ref('test')
 const password = ref('test123')
+const showPassword = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -25,6 +26,7 @@ const errorMsg = ref('')
 function switchMode(target: 'login' | 'register') {
   mode.value = target
   errorMsg.value = ''
+  showPassword.value = false
   if (target === 'register') {
     if (username.value === 'test') username.value = ''
     if (password.value === 'test123') password.value = ''
@@ -149,13 +151,24 @@ async function handleSubmit() {
               <div class="flex items-center justify-between">
                 <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Password</label>
               </div>
-              <input
-                v-model="password"
-                type="password"
-                autocomplete="current-password"
-                :disabled="loading"
-                class="w-full px-3 py-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-300 transition-colors duration-200 disabled:opacity-50"
-              />
+              <div class="relative">
+                <input
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  :disabled="loading"
+                  class="w-full pl-3 pr-10 py-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-300 transition-colors duration-200 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  :disabled="loading"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors disabled:opacity-50"
+                  @click="showPassword = !showPassword"
+                >
+                  <Eye v-if="!showPassword" :size="16" />
+                  <EyeOff v-else :size="16" />
+                </button>
+              </div>
             </div>
           </div>
 
