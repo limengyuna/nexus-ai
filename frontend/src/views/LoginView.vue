@@ -1,9 +1,6 @@
 <script setup lang="ts">
 /**
  * 登录 / 注册页面
- *
- * 极简双栏设计，严格的黑白灰冷淡美学。
- * 登录成功后自动跳转到 query.redirect 或 /。
  */
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -19,8 +16,8 @@ const auth = useAuthStore()
 
 // ---------- 状态 ----------
 const mode = ref<'login' | 'register'>('login')
-const username = ref('')
-const password = ref('')
+const username = ref('test')
+const password = ref('test123')
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -28,6 +25,13 @@ const errorMsg = ref('')
 function switchMode(target: 'login' | 'register') {
   mode.value = target
   errorMsg.value = ''
+  if (target === 'register') {
+    if (username.value === 'test') username.value = ''
+    if (password.value === 'test123') password.value = ''
+  } else {
+    if (!username.value) username.value = 'test'
+    if (!password.value) password.value = 'test123'
+  }
 }
 
 // ---------- 表单提交 ----------
@@ -60,18 +64,14 @@ async function handleSubmit() {
 <template>
   <div class="relative min-h-screen flex bg-white dark:bg-zinc-950 overflow-hidden font-sans">
     
-    <!-- 左半边：极简宣言区（仅大屏展示） -->
-    <!-- 使用完全纯净的锌灰底色，与右侧的纯白形成强烈对比 -->
     <div class="hidden lg:flex lg:w-1/2 relative z-10 flex-col justify-between p-12 xl:p-20 bg-zinc-950 dark:bg-zinc-900 overflow-hidden">
       
-      <!-- 质感背景层 (已调亮以显露结构细节) -->
       <div class="absolute inset-0 z-0 pointer-events-none select-none opacity-70">
         <img 
           src="/hero_bg.png" 
           alt="NexusAI Texture" 
           class="w-full h-full object-cover object-center scale-105"
         />
-        <!-- 轻度遮罩处理，确保白色文字区域依然清晰，释放画面上方的细节 -->
         <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent"></div>
         <div class="absolute inset-0 bg-gradient-to-r from-zinc-950/70 via-transparent to-transparent"></div>
       </div>
@@ -104,7 +104,6 @@ async function handleSubmit() {
       </div>
     </div>
 
-    <!-- 右半边：空气感极简表单区 -->
     <div class="flex-1 relative z-10 flex items-center justify-center p-8 lg:p-16">
       <div class="w-full max-w-sm space-y-10">
         

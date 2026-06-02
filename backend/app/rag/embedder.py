@@ -7,7 +7,7 @@ Embedding 向量化模块
 
 自动回退逻辑：
 - 当 EMBEDDING_PROVIDER=auto 且 DASHSCOPE_API_KEY 未配置时，自动用 Mock。
-- 让本地开发流程不依赖外部 API Key，方便面试演示。
+- 让本地开发流程不依赖外部 API Key。
 """
 import hashlib
 from abc import ABC, abstractmethod

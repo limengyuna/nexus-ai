@@ -301,7 +301,7 @@ function onKeyDown(e: KeyboardEvent) {
       @click="sidebarCollapsed = true"
     ></div>
 
-    <!-- 第一栏：会话列表（引入毛玻璃与高感半透质感） -->
+    <!-- 第一栏：会话列表 -->
     <transition
       enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 -translate-x-4 max-w-0"
@@ -517,7 +517,7 @@ function onKeyDown(e: KeyboardEvent) {
               @regenerate="regenerateLastAnswer"
             />
             
-            <!-- Agent 正在思考中的流光呼吸效果 -->
+            <!-- Agent 正在思考中 -->
             <div v-if="chat.sending && !chat.messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
               <div class="bg-white dark:bg-gray-900/60 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-gray-800 rounded-md rounded-bl-md px-4 py-3 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-3 shadow-sm ">
                 <span class="inline-flex gap-1">
@@ -661,7 +661,7 @@ function onKeyDown(e: KeyboardEvent) {
       @click="showThinking = false"
     ></div>
 
-    <!-- 第三栏：思考过程（带透光半透与平滑抽屉） -->
+    <!-- 第三栏：思考过程 -->
     <transition
       enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 translate-x-8"
@@ -676,7 +676,7 @@ function onKeyDown(e: KeyboardEvent) {
     </transition>
   </div>
 
-  <!-- 新建会话高感弹窗 -->
+  <!-- 新建会话弹窗 -->
   <transition
     enter-active-class="transition-all duration-200 ease-out"
     enter-from-class="opacity-0 scale-95"

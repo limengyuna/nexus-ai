@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 应用主布局：极简黑白灰风格后台
+ * 应用主布局
  */
 import { onMounted, markRaw, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
@@ -70,7 +70,6 @@ const navItems: NavItem[] = [
     >
       <!-- 品牌区 -->
       <div class="h-16 flex items-center px-3 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
-        <!-- 极致几何标志 (与登录页同步) -->
         <div
           class="w-10 h-10 rounded-sm bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 flex items-center justify-center flex-shrink-0 cursor-pointer select-none transition-transform active:scale-95 hover:scale-105"
           @click="handleLogoClick"
@@ -101,7 +100,6 @@ const navItems: NavItem[] = [
         >
           <!-- 图标容器 -->
           <div class="w-12 h-10 flex items-center justify-center flex-shrink-0">
-            <!-- 移除彩色动效，采用干净的对比色与缩放变化 -->
             <component 
               :is="item.icon" 
               :size="18" 
@@ -163,7 +161,7 @@ const navItems: NavItem[] = [
       </div>
     </aside>
 
-    <!-- 移动端极简底部导航栏：HSL毛玻璃与半透质感 -->
+    <!-- 移动端底部导航栏 -->
     <nav class="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-zinc-50/90 dark:bg-zinc-950/90 backdrop-blur-md border-t border-zinc-200/50 dark:border-zinc-800/50 flex items-center justify-around z-40 px-2 shadow-lg">
       <RouterLink
         v-for="item in navItems"
@@ -191,5 +189,5 @@ const navItems: NavItem[] = [
 </template>
 
 <style scoped>
-/* 所有的彩色和跳动动画已移除，完全依赖干净的 Tailwind 类控制状态 */
+
 </style>

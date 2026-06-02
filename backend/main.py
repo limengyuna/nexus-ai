@@ -180,7 +180,7 @@ app.include_router(mcp.router, prefix=API_PREFIX)
 app.include_router(skill.router, prefix=API_PREFIX)
 app.include_router(memory.router, prefix=API_PREFIX)
 app.include_router(memory_profile.router, prefix=API_PREFIX)
-# 内部工具（面试 QA 导出等）
+# 内部集成工具路由
 app.include_router(internal.router, prefix=API_PREFIX)
 
 

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /**
  * 工作区首页 (Dashboard)
- * 极致冷淡黑白灰风格
  */
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -27,7 +26,7 @@ function handleLogout() {
 <template>
   <div class="h-full bg-white dark:bg-zinc-950 overflow-y-auto text-zinc-900 dark:text-zinc-100 font-sans">
     
-    <!-- 极简 Header，仅通过下边框分隔 -->
+
     <header class="border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-20">
       <div class="px-8 py-5 flex items-center justify-between">
         <h1 class="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Workspace</h1>

@@ -303,7 +303,7 @@ async function rejectPref(candidateId: number) {
         </button>
       </div>
 
-      <!-- 锌灰极简三 Tab 导航设计 -->
+      <!-- Tab 导航栏 -->
       <div class="flex flex-wrap items-center gap-1.5 mt-5 border-b border-zinc-100 dark:border-zinc-800/60 pb-1">
         <button
           @click="switchTab('facts')"
@@ -822,7 +822,7 @@ async function rejectPref(candidateId: number) {
 </template>
 
 <style scoped>
-/* 精美的锌灰极简微过渡 */
+
 .fade-in {
   animation: fadeIn 0.2s ease-out;
 }

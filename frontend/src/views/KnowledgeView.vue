@@ -924,7 +924,7 @@ function statusLabel(s: string): string {
         </div>
       </div>
 
-      <!-- 底部毛玻璃翻页与操作栏 -->
+      <!-- 翻页与操作栏 -->
       <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20 bg-white dark:bg-zinc-950 flex items-center justify-between">
         <!-- 左侧：分页状态 -->
         <div class="text-xs text-gray-500 dark:text-gray-400">
@@ -965,25 +965,25 @@ function statusLabel(s: string): string {
 </template>
 
 <style scoped>
-/* 悬浮定制版高奢滚动条 */
+/* 滚动条 */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px; /* 精致窄轨道 */
+  width: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent; /* 滑轨完全透明，消除杂色 */
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.45); /* 提升清晰度的灰度半透明 */
-  border-radius: 9999px; /* 全圆角胶囊状 */
-  border: 2px solid transparent; /* 核心悬浮技巧：外加透明边框 */
-  background-clip: padding-box; /* 让滑块向内收窄，形成悬浮气垫感 */
+  background-color: rgba(156, 163, 175, 0.45);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
   transition: background-color 0.2s ease;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.75); /* hover 自动高亮 */
+  background-color: rgba(156, 163, 175, 0.75);
 }
 
 /* 兼容 Firefox 浏览器 */

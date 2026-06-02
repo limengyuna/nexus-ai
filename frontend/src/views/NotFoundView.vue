@@ -1,8 +1,6 @@
 <script setup lang="ts">
 /**
  * 404 页面
- *
- * 极简风格：大号渐变 404 + 简短文案 + 返回按钮
  */
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Home } from 'lucide-vue-next'
@@ -30,7 +28,7 @@ function goHome() {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-indigo-100 dark:from-gray-950 dark:via-gray-900 dark:to-indigo-950 px-4">
     <div class="text-center max-w-md">
-      <!-- 大号 404 渐变文字 -->
+
       <h1 class="text-[8rem] leading-none font-extrabold bg-gradient-to-br from-primary-500 to-indigo-600 dark:from-primary-400 dark:to-indigo-400 bg-clip-text text-transparent select-none">
         404
       </h1>
