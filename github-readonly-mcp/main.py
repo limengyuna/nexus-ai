@@ -175,32 +175,33 @@ app = FastAPI(
 sse_transport = SseServerTransport("/messages")
 
 
-class MCPSseApp:
+async def handle_sse(scope, receive, send):
     """
-    符合 ASGI 协议的 SSE 长连接网关服务
+    建立 SSE 连接会话的原始 ASGI 处理端点。
     """
-    async def __call__(self, scope, receive, send):
-        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
-            # 将运行环境与 MCP 核心 Server 绑定握手
-            await mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp_server.create_initialization_options()
-            )
+    async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+        # 将运行环境与 MCP 核心 Server 绑定握手
+        await mcp_server.run(
+            read_stream,
+            write_stream,
+            mcp_server.create_initialization_options()
+        )
 
 
-class MCPMessagesApp:
+async def handle_messages(scope, receive, send):
     """
-    符合 ASGI 协议的客户端消息消费网关服务
+    消费并处理 JSON-RPC 消息请求的原始 ASGI 处理端点。
     """
-    async def __call__(self, scope, receive, send):
-        await sse_transport.handle_post_message(scope, receive, send)
+    await sse_transport.handle_post_message(scope, receive, send)
 
 
-# 使用 FastAPI 官方首推的 app.mount 原生挂载底层的 ASGI 应用
-# 彻底绕过 FastAPI 复杂的路由依赖分析系统，提供极致稳定的原生态性能
-app.mount("/sse", MCPSseApp())
-app.mount("/messages", MCPMessagesApp())
+# 直接引入 Starlette 的底层 Route 对象
+from starlette.routing import Route
+
+# 在 APIRouter 外层直接追加原生 ASGI 路由到底层路由表中
+# 100% 杜绝 307 重定向，100% 物理隔离 GET 和 POST 请求，防止任何吞噬冲突！
+app.routes.append(Route("/sse", endpoint=handle_sse, methods=["GET"]))
+app.routes.append(Route("/messages", endpoint=handle_messages, methods=["POST"]))
 
 
 @app.get("/health", summary="健康自检接口")
