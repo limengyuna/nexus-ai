@@ -77,6 +77,10 @@ if not exist "backend\.venv\Scripts\activate.bat" (
 REM 启动 Backend
 start "NexusAI-Backend" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port 8002 --reload"
 
+REM Start GitHub Readonly MCP Service
+start "NexusAI-GitHub-MCP" cmd /k "cd /d %~dp0github-readonly-mcp && uvicorn main:app --host 0.0.0.0 --port 8005"
+
+
 REM 启动 Celery Worker（threads 池 + 4 并发，适合 I/O 密集型任务如 LLM/Embedding API 调用）
 start "NexusAI-Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\activate.bat && celery -A app.tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4"
 
@@ -116,6 +120,7 @@ echo  正在停止所有服务...
 taskkill /FI "WINDOWTITLE eq NexusAI-Backend*" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq NexusAI-Celery*" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq NexusAI-Frontend*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq NexusAI-GitHub-MCP*" /F >nul 2>&1
 
 docker compose stop postgres redis chroma >nul 2>&1
 
