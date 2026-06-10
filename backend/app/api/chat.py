@@ -224,6 +224,11 @@ async def stream_message(
                 return
 
             async for event_type, data in ChatService.chat_stream(local_db, local_session, user_message):
+                if event_type == "ping":
+                    # 发送 SSE 注释作为心跳保活，前端会自动忽略
+                    yield ": keep-alive\n\n"
+                    continue
+
                 # SSE 协议格式：event: <type>\ndata: <json>\n\n
                 payload_json = json.dumps(data, ensure_ascii=False, default=str)
                 yield f"event: {event_type}\ndata: {payload_json}\n\n"
@@ -288,6 +293,10 @@ async def resume_message(
             async for event_type, data in ChatService.chat_resume_stream(
                 local_db, local_session, user_msg_id, decision,
             ):
+                if event_type == "ping":
+                    yield ": keep-alive\n\n"
+                    continue
+
                 payload_json = json.dumps(data, ensure_ascii=False, default=str)
                 yield f"event: {event_type}\ndata: {payload_json}\n\n"
         except Exception as e:

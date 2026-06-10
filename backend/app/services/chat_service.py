@@ -381,16 +381,21 @@ class ChatService:
         """
         import asyncio
         import queue as queue_mod
+        import time
 
         stream_done = False
+        last_yield_time = time.time()
+        
         while not stream_done:
             has_event = False
             while True:
                 try:
                     event_type, data = token_queue.get_nowait()
                     has_event = True
+                    last_yield_time = time.time()
                 except queue_mod.Empty:
                     break
+                    
                 if event_type == "meta":
                     yield ("meta", data)
                 elif event_type == "chunk":
@@ -414,6 +419,9 @@ class ChatService:
                 break
 
             if not has_event:
+                if time.time() - last_yield_time > 15:
+                    yield ("ping", None)
+                    last_yield_time = time.time()
                 await asyncio.sleep(0.02)
 
     # ---------- 流式版本（SSE）----------
