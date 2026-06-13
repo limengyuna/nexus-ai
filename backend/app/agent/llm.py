@@ -9,10 +9,11 @@ DeepSeek API 兼容 OpenAI Chat Completions 协议，所以直接用 openai 官�
 2. complete_stream()     —— 流式生成（用于对话场景，配合 SSE 推送给前端）
 3. complete_with_tools() —— Function Calling（用于 Tool Agent 决定调哪个工具）
 """
+import time as _time
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
 
 from loguru import logger
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
 
 from app.core.config import settings
 
@@ -43,6 +44,42 @@ class LLMClient:
         # 思考模式开关：仅影响 deepseek-v4-pro 等支持思考的模型
         self.thinking_enabled = thinking_enabled if thinking_enabled is not None else settings.DEEPSEEK_THINKING_ENABLED
         logger.info("LLMClient 初始化完成 (model={}, thinking={}, base_url={})", self.model, self.thinking_enabled, base_url or settings.DEEPSEEK_API_BASE)
+
+    # ---------- 重试配置 ----------
+    # 最大重试次数（不含首次调用，即总共最多 1 + _MAX_RETRIES 次）
+    _MAX_RETRIES = 2
+    # 指数退避基数（秒）：第1次重试等1秒，第2次等2秒
+    _RETRY_BACKOFF_BASE = 1.0
+
+    def _call_with_retry(self, kwargs: Dict[str, Any]) -> Any:
+        """
+        带重试的 LLM 调用（底层统一入口）
+
+        仅对以下可恢复错误重试，其他错误直接抛出：
+        - RateLimitError (429)：API 限流
+        - APITimeoutError：请求超时
+        - APIConnectionError：网络连接失败
+        """
+        last_exc = None
+        for attempt in range(1 + self._MAX_RETRIES):
+            try:
+                return self._client.chat.completions.create(**kwargs)
+            except (RateLimitError, APITimeoutError, APIConnectionError) as e:
+                last_exc = e
+                if attempt < self._MAX_RETRIES:
+                    wait = self._RETRY_BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        "[LLM 重试] {} 第{}/{}次重试，等待{:.1f}s | 错误: {}",
+                        type(e).__name__, attempt + 1, self._MAX_RETRIES, wait, e,
+                    )
+                    _time.sleep(wait)
+                else:
+                    logger.error(
+                        "[LLM 重试] {} 已达最大重试次数({})，放弃 | 错误: {}",
+                        type(e).__name__, self._MAX_RETRIES, e,
+                    )
+        # 所有重试耗尽，抛出最后一个异常
+        raise last_exc
 
     def _thinking_extra_body(self) -> Optional[Dict[str, Any]]:
         """根据思考模式开关生成 extra_body 参数"""
@@ -76,7 +113,7 @@ class LLMClient:
         extra = self._thinking_extra_body()
         if extra:
             kwargs["extra_body"] = extra
-        resp = self._client.chat.completions.create(**kwargs)
+        resp = self._call_with_retry(kwargs)
         content = resp.choices[0].message.content or ""
         usage = resp.usage
         logger.debug(
@@ -110,7 +147,7 @@ class LLMClient:
         extra = self._thinking_extra_body()
         if extra:
             kwargs["extra_body"] = extra
-        resp = self._client.chat.completions.create(**kwargs)
+        resp = self._call_with_retry(kwargs)
         content = resp.choices[0].message.content or ""
         usage = resp.usage
         usage_dict = {
@@ -149,7 +186,7 @@ class LLMClient:
         extra = self._thinking_extra_body()
         if extra:
             kwargs["extra_body"] = extra
-        stream = self._client.chat.completions.create(**kwargs)
+        stream = self._call_with_retry(kwargs)
         for chunk in stream:
             if not chunk.choices:
                 continue
@@ -182,7 +219,7 @@ class LLMClient:
         extra = self._thinking_extra_body()
         if extra:
             kwargs["extra_body"] = extra
-        resp = self._client.chat.completions.create(**kwargs)
+        resp = self._call_with_retry(kwargs)
         choice = resp.choices[0]
         tool_calls_raw = choice.message.tool_calls or []
 
