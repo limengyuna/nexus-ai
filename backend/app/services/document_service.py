@@ -42,6 +42,7 @@ class DocumentService:
         db: Session,
         kb: KnowledgeBase,
         upload_file: UploadFile,
+        user_id: int,
         chunk_strategy: Optional[ChunkStrategy] = None,
         enable_llm_clean: Optional[bool] = None,
     ) -> tuple[Document, TaskRecord]:
@@ -98,6 +99,7 @@ class DocumentService:
 
         # 4. 创建 TaskRecord
         task_record = TaskRecord(
+            user_id=user_id,
             type=TaskType.DOCUMENT_PROCESS,
             status=TaskStatus.PENDING,
             related_id=document.id,
@@ -164,7 +166,7 @@ class DocumentService:
 
     # ---------- 重新处理 ----------
     @staticmethod
-    def reprocess(db: Session, document: Document) -> TaskRecord:
+    def reprocess(db: Session, document: Document, user_id: int) -> TaskRecord:
         """
         重新处理文档：清理旧分块 + 重置状态 + 重新投递 Celery 任务
         适用于：上次处理失败、或修改了 KB 的分块策略后想重切
@@ -190,6 +192,7 @@ class DocumentService:
 
         # 3. 创建新 TaskRecord
         task_record = TaskRecord(
+            user_id=user_id,
             type=TaskType.DOCUMENT_PROCESS,
             status=TaskStatus.PENDING,
             related_id=document.id,
@@ -241,6 +244,21 @@ class TaskService:
     @staticmethod
     def get(db: Session, task_id: int) -> Optional[TaskRecord]:
         return db.get(TaskRecord, task_id)
+
+    @staticmethod
+    def get_for_user(
+        db: Session,
+        task_id: int,
+        user_id: int,
+    ) -> Optional[TaskRecord]:
+        return (
+            db.query(TaskRecord)
+            .filter(
+                TaskRecord.id == task_id,
+                TaskRecord.user_id == user_id,
+            )
+            .first()
+        )
 
     @staticmethod
     def update_progress(

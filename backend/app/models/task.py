@@ -9,7 +9,7 @@ from typing import Optional
 
 from sqlalchemy import DateTime
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -38,6 +38,13 @@ class TaskRecord(Base, TimestampMixin):
     __tablename__ = "task_records"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Task owner user ID",
+    )
 
     # Celery 任务 ID（便于反查 Celery 后端结果）
     celery_task_id: Mapped[Optional[str]] = mapped_column(

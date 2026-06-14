@@ -62,6 +62,7 @@ def upload_document(
     try:
         document, task_record = DocumentService.upload(
             db, kb, file,
+            user_id=current_user.id,
             chunk_strategy=chunk_strategy,
             enable_llm_clean=enable_llm_clean,
         )
@@ -206,7 +207,11 @@ def reprocess_document(
     if doc is None or doc.kb_id != kb_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
 
-    task_record = DocumentService.reprocess(db, doc)
+    task_record = DocumentService.reprocess(
+        db,
+        doc,
+        user_id=current_user.id,
+    )
     return ApiResponse.ok(
         data=TaskRecordOut.model_validate(task_record),
         message="文档已重新投递处理",

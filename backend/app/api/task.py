@@ -25,7 +25,7 @@ def get_task(
     current_user: User = Depends(get_current_user),
 ):
     """前端轮询此接口获取异步任务的实时进度与状态"""
-    task = TaskService.get(db, task_id)
+    task = TaskService.get_for_user(db, task_id, current_user.id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
     return ApiResponse.ok(data=TaskRecordOut.model_validate(task))
