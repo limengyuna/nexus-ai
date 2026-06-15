@@ -5,7 +5,7 @@ import request from './request'
 
 // ---------- 类型 ----------
 export type ChunkStrategy = 'recursive' | 'markdown' | 'semantic'
-export type DocumentStatus = 'pending' | 'parsing' | 'chunking' | 'embedding' | 'completed' | 'failed'
+export type DocumentStatus = 'pending' | 'parsing' | 'cleaning' | 'chunking' | 'embedding' | 'storing' | 'completed' | 'failed'
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
 
 export interface KnowledgeBase {
@@ -45,6 +45,7 @@ export interface TaskRecord {
   celery_task_id: string | null
   type: string
   status: TaskStatus
+  detail_status?: DocumentStatus | null
   related_id: number | null
   progress: number
   error_msg: string | null

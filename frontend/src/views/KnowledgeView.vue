@@ -4,12 +4,12 @@
  *
  * 左侧 KB 列表，右侧选中 KB 的文档列表 + 上传
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Eye, FileText, Info, Loader2, Pencil, Plus, RotateCcw, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import * as kbApi from '@/api/knowledge'
-import type { ChunkPreview, DocumentItem, KnowledgeBase, TaskRecord } from '@/api/knowledge'
+import type { ChunkPreview, DocumentItem, DocumentStatus, KnowledgeBase, TaskRecord } from '@/api/knowledge'
 import SkeletonList from '@/components/SkeletonList.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -29,7 +29,7 @@ const createForm = ref({
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const uploadingFiles = ref<{ name: string; progress: number; status: string; error?: string }[]>([])
+const uploadingFiles = ref<{ name: string; progress: number; taskStatus: string; detailStatus: DocumentStatus | null; error?: string }[]>([])
 
 // 编辑弹窗
 const showEditModal = ref(false)
@@ -53,8 +53,8 @@ const filteredDocuments = computed(() => {
 // 批量上传进度统计
 const uploadStats = computed(() => {
   const total = uploadingFiles.value.length
-  const success = uploadingFiles.value.filter((f) => f.status === 'success' || f.status === 'completed').length
-  const failed = uploadingFiles.value.filter((f) => f.status === 'failed').length
+  const success = uploadingFiles.value.filter((f) => f.taskStatus === 'success' || f.taskStatus === 'completed').length
+  const failed = uploadingFiles.value.filter((f) => f.taskStatus === 'failed' || f.taskStatus === 'cancelled').length
   const inProgress = total - success - failed
   return { total, success, failed, inProgress }
 })
@@ -256,7 +256,7 @@ async function confirmUploadWithStrategy() {
   pendingUploadFiles.value = []
 
   for (const file of files) {
-    const trackItem: { name: string; progress: number; status: string; error?: string } = { name: file.name, progress: 0, status: 'pending' }
+    const trackItem = reactive<{ name: string; progress: number; taskStatus: string; detailStatus: DocumentStatus | null; error?: string }>({ name: file.name, progress: 0, taskStatus: 'pending', detailStatus: null })
     uploadingFiles.value.push(trackItem)
     try {
       await kb.uploadDocument(
@@ -264,20 +264,21 @@ async function confirmUploadWithStrategy() {
         file,
         (task: TaskRecord) => {
           trackItem.progress = task.progress
-          trackItem.status = task.status
+          trackItem.taskStatus = task.status
+          trackItem.detailStatus = task.detail_status || null
         },
         strategyOverride,
         llmCleanOverride,
       )
     } catch (e: any) {
-      trackItem.status = 'failed'
+      trackItem.taskStatus = 'failed'
       trackItem.error = e?.message
     } finally {
       // 刷新文档列表
       await kb.fetchDocuments(activeKbId.value)
       // 1.5s 后从进度列表移除已成功的
       setTimeout(() => {
-        if (trackItem.status === 'success') {
+        if (trackItem.taskStatus === 'success' || trackItem.taskStatus === 'completed') {
           uploadingFiles.value = uploadingFiles.value.filter((f) => f !== trackItem)
         }
       }, 1500)
@@ -336,23 +337,33 @@ function fileSize(bytes: number): string {
 
 function statusColor(s: string): string {
   if (s === 'completed' || s === 'success') return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
-  if (s === 'failed') return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
+  if (s === 'failed' || s === 'cancelled') return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
   if (s === 'pending') return 'text-zinc-600 bg-zinc-100 border border-zinc-200 dark:text-zinc-400 dark:bg-zinc-800 dark:border-zinc-700'
   return 'text-zinc-700 bg-zinc-100 border border-zinc-200 dark:text-zinc-300 dark:bg-zinc-800 dark:border-zinc-700'
 }
 
 function statusLabel(s: string): string {
   const m: Record<string, string> = {
-    pending: '等待中',
-    parsing: '解析中',
-    chunking: '分块中',
-    embedding: '向量化',
-    completed: '完成',
-    failed: '失败',
+    pending: '等待后台任务执行',
+    parsing: '正在读取和提取文本',
+    cleaning: '正在优化文档结构，此步骤可能耗时较长',
+    chunking: '正在进行语义分块',
+    embedding: '正在调用模型进行向量化，此步骤通常最耗时',
+    storing: '正在写入知识库',
+    completed: '文档处理完成',
+    failed: '文档处理失败',
+    cancelled: '任务已取消',
     running: '处理中',
-    success: '完成',
+    success: '文档处理完成',
   }
   return m[s] || s
+}
+
+function displayStatus(f: { taskStatus: string; detailStatus: DocumentStatus | null }): string {
+  if (['success', 'completed', 'failed', 'cancelled'].includes(f.taskStatus)) {
+    return f.taskStatus
+  }
+  return f.detailStatus || f.taskStatus
 }
 </script>
 
@@ -486,12 +497,13 @@ function statusLabel(s: string): string {
               <div class="w-40 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
                   class="h-full transition-all"
-                  :class="f.status === 'failed' ? 'bg-red-500' : 'bg-zinc-1000'"
+                  :class="(f.taskStatus === 'failed' || f.taskStatus === 'cancelled') ? 'bg-red-500' : 'bg-zinc-900 dark:bg-zinc-100'"
                   :style="{ width: `${f.progress}%` }"
                 ></div>
               </div>
-              <span class="px-2 py-0.5 rounded text-xs" :class="statusColor(f.status)">
-                {{ statusLabel(f.status) }} {{ f.progress }}%
+              <span class="px-2 py-0.5 rounded text-xs" :class="statusColor(displayStatus(f))">
+                {{ statusLabel(displayStatus(f)) }} <span class="text-gray-400 ml-1">{{ f.progress }}%</span>
+                <Loader2 v-if="!['success', 'completed', 'failed', 'cancelled'].includes(f.taskStatus)" class="inline-block ml-1 animate-spin" :size="12" />
               </span>
             </div>
           </div>

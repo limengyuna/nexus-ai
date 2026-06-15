@@ -85,6 +85,7 @@ def process_document(self, document_id: int, task_record_id: int) -> dict:
                 "[Task] 启用 LLM 清洗 document_id={}（doc={}, kb={}）",
                 document_id, document.enable_llm_clean, kb.enable_llm_clean,
             )
+            DocumentService.update_status(db, document_id, DocumentStatus.CLEANING)
             try:
                 from app.rag.cleaner import clean_document_with_llm
                 text_before = len(text)
@@ -155,6 +156,7 @@ def process_document(self, document_id: int, task_record_id: int) -> dict:
         ]
 
         vector_store = get_vector_store()
+        DocumentService.update_status(db, document_id, DocumentStatus.STORING)
         vector_store.add_chunks(
             collection_name=kb.collection_name,
             chunk_ids=chunk_ids,

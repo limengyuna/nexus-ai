@@ -21,8 +21,10 @@ class DocumentStatus(str, enum.Enum):
     """文档处理状态枚举"""
     PENDING = "pending"        # 等待处理
     PARSING = "parsing"        # 解析中
+    CLEANING = "cleaning"      # LLM 清洗中
     CHUNKING = "chunking"      # 分块中
     EMBEDDING = "embedding"    # 向量化中
+    STORING = "storing"        # 入库中
     COMPLETED = "completed"    # 已完成
     FAILED = "failed"          # 失败
 

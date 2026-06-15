@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.document import DocumentStatus
 from app.models.task import TaskStatus, TaskType
 
 
@@ -17,6 +18,7 @@ class TaskRecordOut(BaseModel):
     celery_task_id: Optional[str]
     type: TaskType
     status: TaskStatus
+    detail_status: Optional[DocumentStatus] = None
     related_id: Optional[int]
     progress: int
     error_msg: Optional[str]

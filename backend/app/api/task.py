@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.task import TaskType
 from app.models.user import User
 from app.schemas.common import ApiResponse
 from app.schemas.task import TaskRecordOut
@@ -28,4 +29,14 @@ def get_task(
     task = TaskService.get_for_user(db, task_id, current_user.id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
-    return ApiResponse.ok(data=TaskRecordOut.model_validate(task))
+        
+    out = TaskRecordOut.model_validate(task)
+    
+    # 若是文档处理任务，查出具体的阶段状态并注入
+    if task.type == TaskType.DOCUMENT_PROCESS and task.related_id:
+        from app.models.document import Document
+        doc = db.get(Document, task.related_id)
+        if doc:
+            out.detail_status = doc.status.value
+            
+    return ApiResponse.ok(data=out)
