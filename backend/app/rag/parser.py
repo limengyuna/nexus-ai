@@ -328,6 +328,53 @@ def _parse_with_unstructured(file_path: Path) -> str:
         raise DocumentParseError(f"文档解析失败: {file_path} - {e}") from e
 
 
+def _parse_pdf_with_pypdf(file_path: Path) -> str:
+    """
+    轻量 PDF 文本抽取。
+
+    适合文字型 PDF、简历、报告、财报正文。它不做 OCR / 版面识别，
+    但内存占用远低于 unstructured[pdf]，更适合 Railway 低内存环境。
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError as e:
+        raise DocumentParseError("缺少 pypdf 依赖，请先安装 requirements.txt") from e
+
+    try:
+        reader = PdfReader(str(file_path))
+        page_count = len(reader.pages)
+        logger.info("PyPDF 开始解析: {} pages={}", file_path.name, page_count)
+
+        page_texts: List[str] = []
+        for idx, page in enumerate(reader.pages, start=1):
+            try:
+                text = page.extract_text() or ""
+            except Exception as e:
+                logger.warning("PyPDF 第 {} 页提取失败: {}", idx, e)
+                text = ""
+            text = text.strip()
+            if text:
+                page_texts.append(f"## Page {idx}\n\n{text}")
+
+        markdown_text = "\n\n".join(page_texts).strip()
+        markdown_text = _enhance_chinese_headings(markdown_text)
+        if len(markdown_text) < 20:
+            raise DocumentParseError(
+                "PDF 轻量文本抽取结果过少，可能是扫描件或图片型 PDF；"
+                "Railway 低内存环境不再自动回退重型 OCR 解析。"
+            )
+
+        logger.info(
+            "PyPDF 解析完成: {} -> {} 页 -> {} 字符",
+            file_path.name, page_count, len(markdown_text),
+        )
+        return markdown_text
+    except DocumentParseError:
+        raise
+    except Exception as e:
+        raise DocumentParseError(f"PDF 轻量解析失败: {file_path} - {e}") from e
+
+
 def _fallback_text_parse(file_path: Path) -> str:
     """纯文本解析的兜底方案"""
     for encoding in ("utf-8", "utf-8-sig", "gbk"):
@@ -378,6 +425,12 @@ class DocumentParser:
             raise UnsupportedFileTypeError(
                 f"不支持的文件类型: {ext}（支持的类型: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}）"
             )
+
+        if ext == ".pdf":
+            logger.info("开始解析文档: {} (类型: {}, 解析器: PyPDF)", path.name, ext)
+            text = _parse_pdf_with_pypdf(path)
+            logger.info("解析完成: {} -> {} 字符", path.name, len(text))
+            return text
 
         logger.info("开始解析文档: {} (类型: {}, 解析器: Unstructured)", path.name, ext)
         text = _parse_with_unstructured(path)

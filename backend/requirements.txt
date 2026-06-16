@@ -34,6 +34,7 @@ loguru==0.7.2                     # 美观的日志库
 chromadb==0.5.23                  # ChromaDB 向量库（Railway 生产环境嵌入式必须完整版；Windows 平台已提供预编译 wheel 无需本地编译）
 langchain-text-splitters==0.3.2   # 仅引入分块策略，不引入整个 langchain
 dashscope==1.20.11                # 阿里通义 Embedding / LLM SDK
+pypdf==4.3.1                      # 轻量 PDF 文本抽取，避免 Railway 低内存环境跑重型 OCR/Layout
 unstructured[pdf,pptx,docx]>=0.15.0   # 文档结构化解析（含 PDF / PPTX / DOCX 子格式支持）
 jieba==0.42.1                     # 中文分词（BM25 关键词检索用）
 
