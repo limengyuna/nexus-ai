@@ -30,6 +30,11 @@ RETRIEVAL_TOP_K = 15
 # Reranker 重排后取的最终数量（送给 LLM）
 RERANK_TOP_N = 6
 
+# 检索扩展查询最大数量
+MAX_RETRIEVAL_QUERIES = 3
+# 每个查询粗召回数量
+PER_QUERY_TOP_K = 8
+
 # 软过滤阈值：余弦距离超过此值的 chunk 视为低相关度
 # ChromaDB 返回的 score 为余弦距离（越小越相关，范围 0~2）
 # 过滤后至少保留 top-1，让 LLM 最终决定是否采用
@@ -49,6 +54,22 @@ _REWRITE_PROMPT = """你是查询改写器。结合以下对话历史，把用�
 {history}
 
 用户最新提问：{query}"""
+
+_QUERY_EXPANSION_PROMPT = """你是 RAG 检索查询优化器。请基于用户问题和已经改写后的独立查询，生成 1-2 个互补检索 query。
+
+规则：
+1. 只生成适合知识库检索的短 query，不要生成回答
+2. 保留原始问题的核心意图，不要引入用户没问的新主题
+3. 可以补充同义说法、关键词说法、模块名说法或更具体的检索角度
+4. 不要和已有 query 重复
+5. 每个 query 控制在 10-30 字
+6. 只输出 JSON 数组，例如 ["查询一", "查询二"]
+
+用户原始问题：
+{user_input}
+
+已改写查询：
+{search_query}"""
 
 _RAG_SYSTEM_PROMPT = """你是 NexusAI 知识库问答助手。请基于下面提供的"参考资料"回答用户问题。
 
@@ -210,6 +231,106 @@ def _rewrite_query(llm, user_input: str, history_text: str) -> tuple:
     return user_input, 0
 
 
+def _normalize_query(q: str) -> str:
+    """归一化查询字符串，用于简单去重"""
+    return "".join(q.lower().split())
+
+
+def _expand_retrieval_queries(llm, user_input: str, search_query: str) -> tuple[list[str], int]:
+    """查询扩展：生成 multi-query 检索查询列表，返回 (queries, tokens)"""
+    import json
+    import re
+    
+    queries = [search_query]
+    if _normalize_query(user_input) != _normalize_query(search_query):
+        queries.append(user_input)
+        
+    try:
+        raw_output, usage = llm.complete_counted(
+            messages=[{"role": "user", "content": _QUERY_EXPANSION_PROMPT.format(
+                user_input=user_input, search_query=search_query,
+            )}],
+            temperature=0.3,
+            max_tokens=300,
+        )
+        tokens_used = usage.get("total_tokens", 0)
+        
+        # 稳健的 JSON 解析：提取 [ 和 ] 之间的内容
+        match = re.search(r'\[(.*)\]', raw_output, re.DOTALL)
+        if match:
+            json_str = '[' + match.group(1) + ']'
+            expanded = json.loads(json_str)
+            if isinstance(expanded, list):
+                for q in expanded:
+                    q = str(q).strip()
+                    if q and len(q) > 2:
+                        queries.append(q)
+                        
+        # 简单去重和限制长度
+        seen = set()
+        final_queries = []
+        for q in queries:
+            norm = _normalize_query(q)
+            if norm not in seen:
+                seen.add(norm)
+                final_queries.append(q)
+                if len(final_queries) >= MAX_RETRIEVAL_QUERIES:
+                    break
+                    
+        logger.info("[RAG Agent] 扩展出检索 Query: {}", final_queries)
+        return final_queries, tokens_used
+    except Exception as e:
+        logger.warning("[RAG Agent] 查询扩展失败，明确回退至单 Query: {}", e)
+        return [search_query], 0
+
+
+def _multi_query_retrieve(vector_store, embedder, collection_name: str, queries: list[str]) -> list:
+    """并发多路召回：主 query 走 hybrid_search，副 query 走 dense search，合并并按得分排序"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    merged = {}
+    
+    def _do_search(idx: int, q: str):
+        query_vec = embedder.embed_query(q)
+        if idx == 0:
+            # 核心 query 走双路混合召回，保证专有名词精确匹配
+            return vector_store.hybrid_search(
+                collection_name=collection_name,
+                query=q,
+                query_embedding=query_vec,
+                top_k=PER_QUERY_TOP_K,
+            )
+        else:
+            # 扩展 query 仅走向量密集召回，避免 BM25 重复计算带来性能损耗
+            return vector_store.search(
+                collection_name=collection_name,
+                query_embedding=query_vec,
+                top_k=PER_QUERY_TOP_K,
+            )
+            
+    # 并发执行检索
+    with ThreadPoolExecutor(max_workers=MAX_RETRIEVAL_QUERIES) as executor:
+        future_to_q = {executor.submit(_do_search, i, q): (i, q) for i, q in enumerate(queries)}
+        for future in as_completed(future_to_q):
+            idx, q = future_to_q[future]
+            try:
+                hits = future.result()
+                for hit in hits:
+                    old = merged.get(hit.chunk_id)
+                    # 保留最小的距离分数（最高相似度）
+                    if old is None or hit.score < old.score:
+                        merged[hit.chunk_id] = hit
+            except Exception as e:
+                if idx == 0:
+                    logger.error("[RAG Agent] 主 query 混合检索失败，抛出异常: {}", e)
+                    raise e
+                else:
+                    logger.warning("[RAG Agent] 副 query 密集检索子任务失败，已忽略: {}", e)
+                
+    # 返回合并后的所有块，按得分升序（距离越小越好）排序
+    return sorted(merged.values(), key=lambda h: h.score)
+
+
 def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     """RAG Agent：检索 + 生成"""
     started_at = time.time()
@@ -266,13 +387,17 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     search_query, rewrite_tokens = _rewrite_query(llm, user_input, history_text)
     node_tokens += rewrite_tokens
 
+    # 查询扩展：生成多个互补检索查询
+    retrieval_queries, expand_tokens = _expand_retrieval_queries(llm, user_input, search_query)
+    node_tokens += expand_tokens
+
     try:
-        query_vec = embedder.embed_query(search_query)
-        raw_hits = vector_store.hybrid_search(
+        # 并发多查询召回
+        raw_hits = _multi_query_retrieve(
+            vector_store=vector_store,
+            embedder=embedder,
             collection_name=collection_name,
-            query=search_query,
-            query_embedding=query_vec,
-            top_k=RETRIEVAL_TOP_K,
+            queries=retrieval_queries,
         )
     except Exception as e:
         logger.exception("[RAG Agent] 检索失败: {}", e)
@@ -459,7 +584,16 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "rag_agent", started_at,
-            input_summary={"query": search_query[:60], "original_query": user_input[:60], "kb_id": kb_id, "retrieval_top_k": RETRIEVAL_TOP_K, "rerank_top_n": RERANK_TOP_N},
+            input_summary={
+                "query": search_query[:60], 
+                "original_query": user_input[:60], 
+                "retrieval_queries": retrieval_queries,
+                "query_count": len(retrieval_queries),
+                "per_query_top_k": PER_QUERY_TOP_K,
+                "kb_id": kb_id, 
+                "total_candidate_limit": len(retrieval_queries) * PER_QUERY_TOP_K, 
+                "rerank_top_n": RERANK_TOP_N
+            },
             output_summary={
                 "hits": len(retrieved_docs),
                 "effective_hits": len(effective_docs),
