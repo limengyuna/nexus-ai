@@ -341,7 +341,16 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     kb_id = state.get("kb_id")
     context_messages = state.get("context_messages", [])
     history_text = _extract_history_text(context_messages)
-    step_contexts = state.get("step_contexts", [])
+    
+    # 获取当前执行的 step index
+    current_step = None
+    for s in state.get("task_plan", []):
+        if s.get("status") == "in_progress":
+            current_step = s.get("step")
+            break
+            
+    step_contexts = state.get("step_contexts", {}) or {}
+    current_step_context = step_contexts.get(current_step, "") if current_step else ""
 
     from app.agent.stream_queue import get_queue
     token_queue = get_queue(state.get("session_id"))  # 提前取出，所有路径都可能需要
@@ -509,8 +518,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     context_block = "\n\n".join(ctx_parts)
 
     instruction_text = supervisor_instruction if supervisor_instruction else "回答用户问题"
-    step_context_str = "\n\n".join(step_contexts) if step_contexts else ""
-    step_context_section = f"\n【前面步骤的执行结果】（可作为补充上下文）：\n{step_context_str}\n" if step_context_str else ""
+    step_context_section = f"\n【前面步骤的执行结果】（可作为补充上下文）：\n{current_step_context}\n" if current_step_context else ""
     
     user_prompt = f"""参考资料：
 {context_block}
