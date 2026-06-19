@@ -13,8 +13,6 @@ const { theme, toggle: toggleTheme } = useTheme()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-
-const hovered = ref(false)
 let logoClickCount = 0
 let logoClickTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -61,15 +59,12 @@ const navItems: NavItem[] = [
   <div class="flex h-screen bg-white dark:bg-zinc-950 relative font-sans text-zinc-900 dark:text-zinc-100">
     <div class="hidden md:block w-16 flex-shrink-0"></div>
 
-    <!-- 侧栏：桌面端显示，移动端隐藏 -->
+    <!-- 侧栏：桌面端显示，移动端隐藏 (固定 w-16) -->
     <aside
-      class="hidden md:flex absolute top-0 left-0 h-screen bg-zinc-50 dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col z-40 transition-all duration-300 overflow-hidden"
-      :class="hovered ? 'w-56 shadow-2xl shadow-zinc-200/50 dark:shadow-black/50' : 'w-16'"
-      @mouseenter="hovered = true"
-      @mouseleave="hovered = false"
+      class="hidden md:flex absolute top-0 left-0 h-screen w-16 bg-zinc-50/80 dark:bg-zinc-900/60 backdrop-blur-xl border-r border-zinc-200/80 dark:border-zinc-800/60 flex-col z-40 transition-colors"
     >
       <!-- 品牌区 -->
-      <div class="h-16 flex items-center px-3 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+      <div class="h-16 flex items-center justify-center border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
         <div
           class="w-10 h-10 rounded-sm bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 flex items-center justify-center flex-shrink-0 cursor-pointer select-none transition-transform active:scale-95 hover:scale-105"
           @click="handleLogoClick"
@@ -79,27 +74,21 @@ const navItems: NavItem[] = [
             <path d="M18 7C18 13 16 17 13 17s-5-3-5-8" stroke="currentColor" stroke-width="3" stroke-linecap="square" />
           </svg>
         </div>
-        <span
-          class="ml-3 text-sm font-semibold tracking-tight whitespace-nowrap transition-opacity duration-200 text-zinc-950 dark:text-zinc-50"
-          :class="hovered ? 'opacity-100' : 'opacity-0'"
-        >
-          NexusAI
-        </span>
       </div>
 
       <!-- 图标导航 -->
-      <nav class="flex-1 py-4 space-y-1 px-2">
+      <nav class="flex-1 py-4 px-2.5 overflow-y-auto">
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="relative flex items-center h-10 px-2 rounded-md transition-colors duration-150 overflow-hidden group"
+          class="relative flex items-center h-11 px-1 mb-1.5 rounded-xl transition-all duration-200 overflow-hidden group"
           :class="route.path.startsWith(item.to)
-            ? 'bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-950 dark:text-zinc-50 font-medium'
-            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/40 dark:hover:bg-zinc-800/40 hover:text-zinc-900 dark:hover:text-zinc-100'"
+            ? 'bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200/50 dark:border-zinc-700/50 text-zinc-900 dark:text-white font-semibold'
+            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-100 border border-transparent'"
         >
           <!-- 图标容器 -->
-          <div class="w-12 h-10 flex items-center justify-center flex-shrink-0">
+          <div class="w-10 h-10 flex items-center justify-center flex-shrink-0">
             <component 
               :is="item.icon" 
               :size="18" 
@@ -107,56 +96,46 @@ const navItems: NavItem[] = [
               class="transition-transform duration-200 group-hover:scale-110"
             />
           </div>
-          <!-- 文字标签 -->
-          <span
-            class="text-sm whitespace-nowrap transition-opacity duration-200"
-            :class="hovered ? 'opacity-100' : 'opacity-0'"
-          >
+          <!-- Tooltip 标签 -->
+          <span class="absolute left-full ml-1 px-2.5 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold rounded-md opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap shadow-md z-50">
             {{ item.label }}
           </span>
         </RouterLink>
       </nav>
 
       <!-- 主题切换按钮 -->
-      <div class="px-2 pb-2 flex-shrink-0">
+      <div class="px-2.5 pb-2 flex-shrink-0">
         <button
-          class="flex items-center w-full h-10 px-2 rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/40 dark:hover:bg-zinc-800/40 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 overflow-hidden group"
+          class="flex items-center w-full h-11 px-1 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 overflow-hidden group"
           :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
           @click="toggleTheme"
         >
-          <div class="w-12 h-10 flex items-center justify-center flex-shrink-0">
+          <div class="w-10 h-10 flex items-center justify-center flex-shrink-0">
             <Sun v-if="theme === 'dark'" :size="18" :stroke-width="2" class="group-hover:text-zinc-100 transition-colors" />
             <Moon v-else :size="18" :stroke-width="2" class="group-hover:text-zinc-900 transition-colors" />
           </div>
-          <span
-            class="text-sm whitespace-nowrap transition-opacity duration-200"
-            :class="hovered ? 'opacity-100' : 'opacity-0'"
-          >
-            {{ theme === 'dark' ? 'Light mode' : 'Dark mode' }}
+          <!-- Tooltip -->
+          <span class="absolute left-full ml-1 px-2.5 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold rounded-md opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap shadow-md z-50">
+            {{ theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode' }}
           </span>
         </button>
       </div>
 
       <!-- 底部用户区 -->
-      <div class="p-2 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+      <div class="p-2.5 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
         <button
-          class="flex items-center w-full h-12 px-2 rounded-md hover:bg-zinc-200/40 dark:hover:bg-zinc-800/40 transition-colors duration-150 overflow-hidden"
+          class="flex items-center w-full h-12 px-1 rounded-xl hover:bg-zinc-200/60 dark:hover:bg-zinc-800/50 transition-colors duration-150 overflow-hidden group"
           @click="logout"
         >
-          <div class="w-12 h-10 flex items-center justify-center flex-shrink-0">
-            <div class="w-7 h-7 rounded-sm bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center text-xs font-semibold">
+          <div class="w-10 h-10 flex items-center justify-center flex-shrink-0">
+            <div class="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center text-xs font-bold group-hover:bg-zinc-300 dark:group-hover:bg-zinc-700 transition-colors">
               {{ (auth.userInfo?.username ?? '?').charAt(0).toUpperCase() }}
             </div>
           </div>
-          <div
-            class="flex flex-col items-start min-w-0 transition-opacity duration-200 pl-1"
-            :class="hovered ? 'opacity-100' : 'opacity-0'"
-          >
-            <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate w-full text-left">
-              {{ auth.userInfo?.username ?? 'Not logged in' }}
-            </span>
-            <span class="text-[10px] text-zinc-500 font-medium tracking-wide">Sign out</span>
-          </div>
+          <!-- Tooltip -->
+          <span class="absolute left-full ml-1 px-2.5 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold rounded-md opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap shadow-md z-50">
+            Sign out ({{ auth.userInfo?.username ?? 'Guest' }})
+          </span>
         </button>
       </div>
     </aside>

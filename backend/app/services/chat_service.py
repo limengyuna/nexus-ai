@@ -239,6 +239,7 @@ class ChatService:
         5. 返回 assistant message + 完整 state（含 execution_trace）
         """
         # 1. 保存用户消息
+        from datetime import datetime, timezone
         user_msg = ChatMessage(
             session_id=session.id,
             role=MessageRole.USER,
@@ -246,6 +247,7 @@ class ChatService:
             agent_source=AgentSource.USER,
         )
         db.add(user_msg)
+        db.query(ChatSession).filter(ChatSession.id == session.id).update({"updated_at": datetime.now(timezone.utc)})
         db.commit()
 
         # 2. 刷新 session 以获取最新的 summary（异步压缩可能已更新）
@@ -452,6 +454,7 @@ class ChatService:
         from app.agent.state import make_initial_state
 
         # ---------- 1. 保存用户消息 ----------
+        from datetime import datetime, timezone
         user_msg = ChatMessage(
             session_id=session.id,
             role=MessageRole.USER,
@@ -459,6 +462,7 @@ class ChatService:
             agent_source=AgentSource.USER,
         )
         db.add(user_msg)
+        db.query(ChatSession).filter(ChatSession.id == session.id).update({"updated_at": datetime.now(timezone.utc)})
         db.commit()
         yield ("status", {"step": "user_saved", "user_msg_id": user_msg.id})
 
@@ -732,6 +736,10 @@ class ChatService:
         user_input = user_msg.content
 
         yield ("status", {"step": "resuming", "user_msg_id": user_msg_id})
+        
+        from datetime import datetime, timezone
+        db.query(ChatSession).filter(ChatSession.id == session.id).update({"updated_at": datetime.now(timezone.utc)})
+        db.commit()
 
         # 准备流式队列与 thread 配置
         from app.agent.cancel_registry import clear_cancel

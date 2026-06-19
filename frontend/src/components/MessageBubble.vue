@@ -107,10 +107,10 @@ const shortTime = computed(() => {
 
       <!-- 气泡内容 -->
       <div
-        class="rounded-md px-4 py-3 shadow-sm break-words"
+        class="rounded-2xl px-5 py-3.5 shadow-sm break-words text-[15px] leading-relaxed transition-all duration-200"
         :class="isUser
-          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm'
-          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'"
+          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm shadow-zinc-200/50 dark:shadow-none'
+          : 'bg-white dark:bg-zinc-900/80 border border-zinc-100 dark:border-zinc-800/80 text-zinc-800 dark:text-zinc-100 rounded-bl-sm'"
       >
         <div v-if="isUser" class="whitespace-pre-wrap">{{ message.content }}</div>
         <div v-else class="markdown-body" v-html="renderedHtml"></div>
@@ -190,7 +190,7 @@ const shortTime = computed(() => {
 .markdown-body :deep(h1) { font-size: 1.4em; }
 .markdown-body :deep(h2) { font-size: 1.2em; }
 .markdown-body :deep(h3) { font-size: 1.05em; }
-.markdown-body :deep(p) { margin: 0.5em 0; line-height: 1.65; }
+.markdown-body :deep(p) { margin: 0.6em 0; line-height: 1.75; }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
   margin: 0.5em 0;
@@ -241,4 +241,35 @@ const shortTime = computed(() => {
   margin: 0.5em 0;
 }
 .markdown-body :deep(strong) { font-weight: 600; }
+
+/* Markdown Table 优化 */
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-size: 0.9em;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(228 228 231); /* zinc-200 */
+}
+:global(html.dark) .markdown-body :deep(table) {
+  box-shadow: 0 0 0 1px rgb(39 39 42); /* zinc-800 */
+}
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 0.75em 1em;
+  border: 1px solid rgb(228 228 231); /* zinc-200 */
+}
+:global(html.dark) .markdown-body :deep(th),
+:global(html.dark) .markdown-body :deep(td) {
+  border-color: rgb(39 39 42); /* zinc-800 */
+}
+.markdown-body :deep(th) {
+  background-color: rgb(244 244 245); /* zinc-100 */
+  font-weight: 600;
+  text-align: left;
+}
+:global(html.dark) .markdown-body :deep(th) {
+  background-color: rgb(24 24 27); /* zinc-900 */
+}
 </style>
