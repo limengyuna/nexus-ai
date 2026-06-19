@@ -81,6 +81,18 @@ class BusinessContextRecord(TypedDict, total=False):
     error: Optional[str]
 
 
+class AgentObservation(TypedDict, total=False):
+    """分层结果契约：子 Agent 返回给 Supervisor 的结构化执行信号"""
+    agent: str
+    status: str
+    summary: str
+    quality_signals: Dict[str, Any]
+    risk_flags: List[str]
+    evidence: Dict[str, Any]
+    public_answer_ref: str
+    public_answer_preview: str
+
+
 # ---------- 主 State ----------
 class AgentState(TypedDict, total=False):
     """LangGraph 全局共享状态"""
@@ -122,6 +134,10 @@ class AgentState(TypedDict, total=False):
     # ---------- 输出 ----------
     final_answer: str                          # 最终回答（流式时也会逐步填充完整）
     retrieved_business_context: Annotated[List[BusinessContextRecord], operator.add]
+    
+    # ---------- 分层结果契约 ----------
+    agent_observations: Annotated[List[AgentObservation], operator.add]
+    latest_observation: Optional[AgentObservation]
 
     # ---------- 可观测性 ----------
     execution_trace: List[TraceStep]           # 节点执行链路追踪
@@ -182,6 +198,8 @@ def make_initial_state(
         pending_approval=None,
         approval_decision=None,
         last_task_plan_meta=None,
+        agent_observations=[],
+        latest_observation=None,
     )
 
 

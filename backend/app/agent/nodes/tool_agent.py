@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from app.agent.llm import get_llm_fast
+from app.agent.observation import build_tool_observation
 from app.agent.skills import get_skill, skill_registry
 from app.agent.state import AgentState, ToolCallRecord, append_trace
 from app.agent.tools import get_tool, tool_registry
@@ -168,9 +169,14 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         # 流式模式：推送答案（不发 done，由 Supervisor 控制）
         if token_queue:
             token_queue.put(("chunk", answer))
+            
+        obs = build_tool_observation([], answer)
+        
         return {
             "final_answer": answer,
             "tool_calls": [],
+            "latest_observation": obs,
+            "agent_observations": [obs],
             "total_tokens": state.get("total_tokens", 0) + node_tokens,
             "execution_trace": append_trace(
                 state, "tool_agent", started_at,
@@ -464,10 +470,14 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     existing_tool_calls = state.get("tool_calls", [])
     all_tool_calls = existing_tool_calls + tool_call_records
 
+    obs = build_tool_observation(tool_call_records, final_answer)
+
     return {
         "skill_used": skill_used,
         "tool_calls": all_tool_calls,
         "final_answer": final_answer,
+        "latest_observation": obs,
+        "agent_observations": [obs],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "tool_agent", started_at,

@@ -18,6 +18,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agent.llm import get_llm_fast
+from app.agent.observation import build_rag_observation
 from app.agent.state import AgentState, FaithfulnessClaim, FaithfulnessResult, RetrievedDoc, append_trace
 from app.core.database import SessionLocal
 from app.models.knowledge_base import KnowledgeBase
@@ -352,8 +353,11 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         logger.warning("[RAG Agent] state.kb_id 为空，跳过")
         msg = "未指定知识库，无法进行知识库问答。"
         _push_early_return(msg)
+        obs = build_rag_observation([], None, msg, is_error=True)
         return {
             "final_answer": msg,
+            "latest_observation": obs,
+            "agent_observations": [obs],
             "execution_trace": append_trace(
                 state, "rag_agent", started_at,
                 error="no kb_id",
@@ -367,8 +371,11 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         if kb is None or not kb.collection_name:
             msg = f"知识库 #{kb_id} 不存在或未初始化。"
             _push_early_return(msg)
+            obs = build_rag_observation([], None, msg, is_error=True)
             return {
                 "final_answer": msg,
+                "latest_observation": obs,
+                "agent_observations": [obs],
                 "execution_trace": append_trace(
                     state, "rag_agent", started_at,
                     error=f"kb {kb_id} missing",
@@ -403,8 +410,11 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         logger.exception("[RAG Agent] 检索失败: {}", e)
         msg = f"检索知识库时出错: {e}"
         _push_early_return(msg)
+        obs = build_rag_observation([], None, msg, is_error=True)
         return {
             "final_answer": msg,
+            "latest_observation": obs,
+            "agent_observations": [obs],
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
 
@@ -441,9 +451,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     if not retrieved_docs:
         msg = "在当前知识库中未找到相关内容。"
         _push_early_return(msg)
+        obs = build_rag_observation([], None, msg)
         return {
             "retrieved_docs": [],
             "final_answer": msg,
+            "latest_observation": obs,
+            "agent_observations": [obs],
             "execution_trace": append_trace(
                 state, "rag_agent", started_at,
                 input_summary={"query": user_input[:60], "kb_id": kb_id},
@@ -540,9 +553,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         err_msg = f"生成回答时出错: {e}"
         if token_queue:
             token_queue.put(("chunk", err_msg))
+        obs = build_rag_observation(retrieved_docs, None, err_msg, is_error=True)
         return {
             "retrieved_docs": retrieved_docs,
             "final_answer": err_msg,
+            "latest_observation": obs,
+            "agent_observations": [obs],
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
     finally:
@@ -577,10 +593,14 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         )
         node_tokens += faith_tokens
 
+    obs = build_rag_observation(retrieved_docs, faithfulness_result, answer)
+
     return {
         "retrieved_docs": retrieved_docs,
         "faithfulness": faithfulness_result,
         "final_answer": answer,
+        "latest_observation": obs,
+        "agent_observations": [obs],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "rag_agent", started_at,

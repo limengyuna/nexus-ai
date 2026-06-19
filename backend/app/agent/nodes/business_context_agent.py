@@ -18,6 +18,7 @@ from app.agent.tools.business_context import (
     list_business_context_tools,
     get_business_context_tool
 )
+from app.agent.observation import build_business_context_observation
 
 
 BUSINESS_CONTEXT_SYSTEM_PROMPT = """你是 NexusAI 的业务上下文助手。
@@ -162,9 +163,13 @@ def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
     if token_queue and final_answer:
         token_queue.put(("chunk", final_answer))
 
+    obs = build_business_context_observation(context_records, final_answer)
+
     return {
         "final_answer": final_answer,
         "retrieved_business_context": context_records,
+        "latest_observation": obs,
+        "agent_observations": [obs],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state,

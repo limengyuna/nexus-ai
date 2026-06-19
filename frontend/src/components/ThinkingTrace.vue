@@ -171,17 +171,23 @@ function stepStatusColor(status: string) {
 }
 
 function agentIcon(agent: string) {
-  return agent === 'rag_agent' ? BookOpen : Wrench
+  if (agent === 'rag_agent') return BookOpen
+  if (agent === 'business_context_agent') return Building
+  return Wrench
 }
 
 function agentLabel(agent: string) {
-  return agent === 'rag_agent' ? 'RAG Agent' : 'Tool Agent'
+  if (agent === 'rag_agent') return 'RAG Agent'
+  if (agent === 'business_context_agent') return 'Context Agent'
+  return 'Tool Agent'
 }
 
 function agentBadgeClass(agent: string) {
-  return agent === 'rag_agent'
-    ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300'
-    : 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+  if (agent === 'rag_agent')
+    return 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300'
+  if (agent === 'business_context_agent')
+    return 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300'
+  return 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
 }
 </script>
 

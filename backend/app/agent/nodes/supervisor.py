@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from app.agent.llm import get_llm_fast
+from app.agent.observation import select_review_mode
 from app.agent.skills import skill_registry
 from app.agent.state import AgentState, append_trace
 
@@ -430,10 +431,15 @@ def _execution_phase(
     """子 Agent 完成后：LLM 判断下一步"""
     node_tokens = 0
 
-    # 标记当前执行中的步骤为 completed
+    # 标记当前执行中的步骤状态
+    # 为了兼容前端对 status 枚举值的限制 (通常只认识 pending/in_progress/completed)，
+    # 我们把最终结果状态记录在 observation_status，而原 status 统一设为 completed。
     current_step_idx = None
     for i, step in enumerate(task_plan):
         if step.get("status") == "in_progress":
+            latest_obs = state.get("latest_observation")
+            if latest_obs:
+                task_plan[i]["observation_status"] = latest_obs.get("status")
             task_plan[i]["status"] = "completed"
             current_step_idx = i
             break
@@ -450,12 +456,32 @@ def _execution_phase(
     system_prompt = _build_step_check_prompt()
     plan_summary = json.dumps(task_plan, ensure_ascii=False, indent=2)
 
+    # ---------------- 动态上下文读取 (分层结果契约) ----------------
+    latest_obs = state.get("latest_observation")
+    execution_result_text = ""
+    
+    if latest_obs:
+        step_dict = task_plan[current_step_idx] if current_step_idx is not None else {}
+        review_mode = select_review_mode(latest_obs, step_dict)
+        logger.info(f"[Supervisor] 采用分档读取策略: {review_mode}")
+        
+        execution_result_text = f"状态: {latest_obs.get('status')}\n摘要: {latest_obs.get('summary')}\n质量信号: {json.dumps(latest_obs.get('quality_signals', {}), ensure_ascii=False)}\n风险标记: {latest_obs.get('risk_flags', [])}\n"
+        
+        if review_mode in ("evidence", "full"):
+            execution_result_text += f"证据: {json.dumps(latest_obs.get('evidence', {}), ensure_ascii=False)}\n截断回答: {latest_obs.get('public_answer_preview', '')}\n"
+            
+        if review_mode == "full":
+            execution_result_text += f"完整回答: {final_answer}\n"
+    else:
+        # 兼容旧路径
+        execution_result_text = final_answer[:1500]
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": (
             f"用户原始请求：{user_input}\n\n"
             f"当前执行计划：\n{plan_summary}\n\n"
-            f"最新执行结果（摘要）：\n{final_answer[:1500]}\n\n"
+            f"最新执行结果：\n{execution_result_text}\n\n"
             "请决定下一步。严格输出 JSON。"
         )},
     ]
@@ -708,7 +734,9 @@ def _finish_with_chitchat(
     answer = ""
     try:
         if token_queue:
-            token_queue.put(("meta", {"intent": "chitchat", "route_reason": reason, "task_plan": []}))
+            # 优化前端显示的 route_reason，避免把内部解析报错直接抛给用户
+            display_reason = "日常闲聊与问答" if "失败" in reason else "直接回答"
+            token_queue.put(("meta", {"intent": "chitchat", "route_reason": display_reason, "task_plan": []}))
             chunks = []
             for tok in llm.complete_stream(messages=chitchat_messages, temperature=0.6, max_tokens=800):
                 chunks.append(tok)
