@@ -42,19 +42,21 @@ PER_QUERY_TOP_K = 8
 RELEVANCE_THRESHOLD = 0.42
 
 # 查询改写提示词：结合对话历史把模糊查询改写为具体查询
-_REWRITE_PROMPT = """你是查询改写器。结合以下对话历史，把用户的最新提问改写为一个适合向量检索的独立查询。
+_REWRITE_PROMPT = """你是 RAG 知识检索环节的查询改写器。
+请根据用户的【原始提问】和当前分配给你的【具体任务指令】，提取出适合向量检索的独立查询。
 
 规则：
-1. 仅解决指代消歧：把代词（"它""这个""上面的"）替换为对话中的具体实体
-2. 保留用户的原始关键词和意图，不要添加用户没提到的限定词
-3. 不要过度改写：如果提问已经足够明确，原样输出即可
-4. 输出应简洁，适合用作向量检索的查询（10-30字为佳）
-5. 只输出改写后的查询，不要其他任何文字
+1. 核心目标：剥离【原始提问】中与其他任务（如查配置、写报告、调用工具）无关的部分，仅提取【当前任务指令】所需要的知识库搜索实体。
+2. 仅解决指代消歧：把代词（"它""这个""上面的"）替换为对话历史中的具体实体。
+3. 严格去动作化：输出必须是纯粹的知识实体或短语，不能包含动作指令（如“请检索”、“整理成报告”、“总结”等词汇）。
+4. 不要过度改写：如果需要搜索的概念已经足够明确，提取原词即可。
+5. 只输出改写后的查询，不要其他任何文字。
 
 对话历史：
 {history}
 
-用户最新提问：{query}"""
+用户原始提问：{user_input}
+你的当前任务指令：{supervisor_instruction}"""
 
 _QUERY_EXPANSION_PROMPT = """你是 RAG 检索查询优化器。请基于用户问题和已经改写后的独立查询，生成 1-2 个互补检索 query。
 
@@ -211,14 +213,14 @@ def _extract_history_text(messages: list) -> str:
     return "\n".join(history_parts)
 
 
-def _rewrite_query(llm, user_input: str, history_text: str) -> tuple:
-    """查询改写：结合对话历史把模糊查询改写为具体查询，返回 (query, tokens)"""
-    if not history_text:
-        return user_input, 0
+def _rewrite_query(llm, user_input: str, supervisor_instruction: str, history_text: str) -> tuple:
+    """查询改写：结合对话历史和调度指令把模糊查询改写为具体查询，返回 (query, tokens)"""
     try:
         rewritten, usage = llm.complete_counted(
             messages=[{"role": "user", "content": _REWRITE_PROMPT.format(
-                history=history_text, query=user_input,
+                history=history_text or "无",
+                user_input=user_input,
+                supervisor_instruction=supervisor_instruction or "无",
             )}],
             temperature=0,
             max_tokens=200,
@@ -243,9 +245,8 @@ def _expand_retrieval_queries(llm, user_input: str, search_query: str) -> tuple[
     import re
     
     queries = [search_query]
-    if _normalize_query(user_input) != _normalize_query(search_query):
-        queries.append(user_input)
-        
+    # 已删除：直接将 user_input 追加到查询队列的做法，防止动作词汇再次污染向量检索
+
     try:
         raw_output, usage = llm.complete_counted(
             messages=[{"role": "user", "content": _QUERY_EXPANSION_PROMPT.format(
@@ -336,9 +337,11 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     """RAG Agent：检索 + 生成"""
     started_at = time.time()
     user_input = state.get("user_input", "")
+    supervisor_instruction = state.get("supervisor_instruction", "")
     kb_id = state.get("kb_id")
     context_messages = state.get("context_messages", [])
     history_text = _extract_history_text(context_messages)
+    step_contexts = state.get("step_contexts", [])
 
     from app.agent.stream_queue import get_queue
     token_queue = get_queue(state.get("session_id"))  # 提前取出，所有路径都可能需要
@@ -389,9 +392,9 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     vector_store = get_vector_store()
     llm = get_llm_fast()
 
-    # 查询改写：结合对话历史把模糊查询改写为具体查询
+    # 查询改写：结合对话历史和调度指令把模糊查询改写为具体查询
     node_tokens = 0
-    search_query, rewrite_tokens = _rewrite_query(llm, user_input, history_text)
+    search_query, rewrite_tokens = _rewrite_query(llm, user_input, supervisor_instruction, history_text)
     node_tokens += rewrite_tokens
 
     # 查询扩展：生成多个互补检索查询
@@ -505,14 +508,19 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         )
     context_block = "\n\n".join(ctx_parts)
 
+    instruction_text = supervisor_instruction if supervisor_instruction else "回答用户问题"
+    step_context_str = "\n\n".join(step_contexts) if step_contexts else ""
+    step_context_section = f"\n【前面步骤的执行结果】（可作为补充上下文）：\n{step_context_str}\n" if step_context_str else ""
+    
     user_prompt = f"""参考资料：
 {context_block}
-
+{step_context_section}
 ---
 
-用户问题：{user_input}
+【用户原始问题】：{user_input}
+【你的当前任务】：{instruction_text}
 
-请基于上述参考资料回答。"""
+请严格基于上述[参考资料]和[前面步骤的执行结果]（如果有），优先完成【你的当前任务】。如果相关资料中缺少完成任务所需的信息，请明确说明无法获取，不要自行编造。"""
 
     # ---------- 3. LLM 生成回答 ----------
     # 上下文由 context_prep 统一注入到 state.messages
