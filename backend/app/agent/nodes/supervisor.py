@@ -580,10 +580,21 @@ def _dispatch_step(
     step_contexts = dict(state.get("step_contexts", {}))
     if step.get("needs_previous_output") and step["step"] not in step_contexts:
         previous_output = state.get("final_answer", "") or ""
+        # 把前置步骤继承下来的上下文与当前最新产出拼接起来
+        prev_step = step["step"] - 1
+        prev_context = step_contexts.get(prev_step, "") if prev_step > 0 else ""
+        
+        combined_parts = []
+        if prev_context:
+            combined_parts.append(prev_context)
         if previous_output:
-            step_contexts[step["step"]] = previous_output[:_STEP_CONTEXT_MAX_LEN]
-            logger.info("[Supervisor] step {} 引用上一步输出 ({} 字)",
-                        step["step"], len(previous_output))
+            combined_parts.append(f"[Step {prev_step} 的执行结果]:\n{previous_output}")
+            
+        combined = "\n\n".join(combined_parts)
+        if combined:
+            step_contexts[step["step"]] = combined[-_STEP_CONTEXT_MAX_LEN:]
+            logger.info("[Supervisor] step {} 累积级联输出 ({} 字)",
+                        step["step"], len(step_contexts[step["step"]]))
 
     logger.info("[Supervisor] 分发 step {} → {} | {}", step["step"], next_agent, instruction[:50])
 
