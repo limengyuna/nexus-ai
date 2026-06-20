@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { ChatApproval } from '@/api/chat'
+import type { InterruptEvent } from '@/api/chat'
 
 defineProps<{
-  approval: ChatApproval
+  approval: InterruptEvent
   sending: boolean
 }>()
 
