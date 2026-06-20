@@ -79,6 +79,7 @@ class BusinessContextRecord(TypedDict, total=False):
     result: Any
     elapsed_ms: int
     error: Optional[str]
+    trust_level: str
 
 
 class AgentObservation(TypedDict, total=False):
@@ -91,6 +92,11 @@ class AgentObservation(TypedDict, total=False):
     evidence: Dict[str, Any]
     public_answer_ref: str
     public_answer_preview: str
+    system_verified: List[Dict[str, Any]]
+    external_unverified: List[Dict[str, Any]]
+    inferred: List[Dict[str, Any]]
+    model_generated: List[str]
+    failures: List[str]
 
 
 # ---------- 主 State ----------

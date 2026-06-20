@@ -125,10 +125,13 @@ def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
                 "arguments": arguments,
                 "result": tool_result,
                 "elapsed_ms": elapsed_ms,
-                "error": tool_result.get("error") if isinstance(tool_result, dict) else None
+                "error": tool_result.get("error") if isinstance(tool_result, dict) else None,
+                "trust_level": "execution_verified" if not (isinstance(tool_result, dict) and tool_result.get("error")) else "failed"
             })
             
-            messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result)})
+            import json
+            from app.agent.tool_result import compact_for_llm
+            messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(compact_for_llm(tool_result), ensure_ascii=False)})
         else:
             final_answer = "未能获取有效的业务上下文结果。"
             break
@@ -148,10 +151,14 @@ def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
             "arguments": {},
             "result": tool_result,
             "elapsed_ms": elapsed_ms,
-            "error": tool_result.get("error") if isinstance(tool_result, dict) else None
+            "error": tool_result.get("error") if isinstance(tool_result, dict) else None,
+            "trust_level": "execution_verified" if not (isinstance(tool_result, dict) and tool_result.get("error")) else "failed"
         })
+        import json
+        from app.agent.tool_result import compact_for_llm
         # 用普通 user 消息把工具结果交给模型总结，避免 OpenAI 对孤立 tool message 报错
-        messages.append({"role": "user", "content": f"系统自动获取了上下文数据：\n{tool_result}\n请根据该数据回答用户的原始问题。"})
+        compacted = json.dumps(compact_for_llm(tool_result), ensure_ascii=False)
+        messages.append({"role": "user", "content": f"系统自动获取了上下文数据：\n{compacted}\n请根据该数据回答用户的原始问题。"})
         
         # one more LLM call to summarize
         resp = llm.complete_with_tools(messages=messages, tools=openai_tools, temperature=0.1)

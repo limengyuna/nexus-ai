@@ -88,13 +88,7 @@ def is_dangerous_tool(
         # 用户显式白名单豁免
         if safe_mcp_whitelist and tool_name in safe_mcp_whitelist:
             return False
-        # 启发式：纯查询关键词（list_* / get_* / search_* / read_*）→ 可豁免
-        # 但若同时含高危关键词（如 write_after_read），则仍判为危险
-        has_safe_kw = any(kw in name_lower for kw in _SAFE_MCP_TOOL_KEYWORDS)
-        has_risk_kw = any(kw in name_lower for kw in _HIGH_RISK_KEYWORDS)
-        if has_safe_kw and not has_risk_kw:
-            return False
-        # 默认：MCP 工具一律视为危险
+        # 已移除名字启发式安全判断，未知 MCP 均视为危险，防止被伪装绕过。
         return True
 
     # 未知类型 → 保守判断为危险

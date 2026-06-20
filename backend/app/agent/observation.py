@@ -57,6 +57,9 @@ def select_review_mode(observation: Dict[str, Any], step: Dict[str, Any]) -> str
     if status == "partial":
         return "evidence"
 
+    if observation.get("external_unverified"):
+        return "evidence"
+
     if observation.get("risk_flags"):
         return "evidence"
 
@@ -128,24 +131,56 @@ def build_tool_observation(tool_calls: List[Dict[str, Any]], answer: str) -> Dic
     from app.agent.tools.danger import is_dangerous_tool
     
     total_calls = len(tool_calls)
-    failed_calls = sum(1 for tc in tool_calls if "error" in str(tc.get("result", "")).lower() or tc.get("error"))
-    successful_calls = total_calls - failed_calls
-    used_mcp = any(tc.get("kind") == "mcp_tool" for tc in tool_calls)
-    
+    failed_calls = 0
+    successful_calls = 0
+    used_mcp = False
     has_side_effects = False
     needs_approval = False
     error_count = 0
+    
+    system_verified = []
+    external_unverified = []
+    failures = []
 
     for tc in tool_calls:
-        if tc.get("error") or (isinstance(tc.get("result"), dict) and tc.get("result", {}).get("error")):
-            error_count += 1
-            
         raw_kind = tc.get("kind", "")
+        used_mcp = used_mcp or raw_kind == "mcp_tool"
         danger_kind = "internal" if raw_kind == "tool" else "mcp" if raw_kind == "mcp_tool" else raw_kind
-        
         if is_dangerous_tool(tc.get("name", ""), danger_kind):
             has_side_effects = True
             needs_approval = True
+
+        res = tc.get("result", {})
+        trust = "unknown"
+        if isinstance(res, dict) and "verification" in res:
+            trust = res["verification"].get("trust_level", "unknown")
+            is_err = not res.get("ok", True)
+        else:
+            is_err = tc.get("error") or (isinstance(res, dict) and res.get("error"))
+            
+        if is_err:
+            failed_calls += 1
+            error_count += 1
+        else:
+            successful_calls += 1
+            
+        preview = str(res)[:200]
+        ev = {
+            "name": tc.get("name"), 
+            "status": "failed" if is_err else "success",
+            "trust_level": trust,
+            "tool_type": res.get("tool_type", "unknown") if isinstance(res, dict) else "unknown",
+            "result_preview": preview
+        }
+        
+        if is_err:
+            failures.append(ev)
+        elif trust == "execution_verified":
+            system_verified.append(ev)
+        elif trust == "external_unverified":
+            external_unverified.append(ev)
+        else:
+            external_unverified.append(ev)
     
     risk_flags = []
     if failed_calls > 0:
@@ -177,15 +212,13 @@ def build_tool_observation(tool_calls: List[Dict[str, Any]], answer: str) -> Dic
         },
         "risk_flags": normalize_risk_flags(risk_flags),
         "evidence": {
-            "tool_results_summary": [
-                {
-                    "name": tc.get("name"), 
-                    "status": "failed" if "error" in str(tc.get("result", "")).lower() or tc.get("error") else "success",
-                    "result_preview": str(tc.get("result", ""))[:200]
-                }
-                for tc in tool_calls
-            ]
+            "system_verified_tools": system_verified,
+            "external_unverified_tools": external_unverified,
+            "failed_tools": failures
         },
+        "system_verified": system_verified,
+        "external_unverified": external_unverified,
+        "failures": failures,
         "public_answer_ref": "state.final_answer",
         "public_answer_preview": answer[:1500] if answer else "",
     }
@@ -193,15 +226,31 @@ def build_tool_observation(tool_calls: List[Dict[str, Any]], answer: str) -> Dic
 
 def build_business_context_observation(context_records: List[Dict[str, Any]], answer: str) -> Dict[str, Any]:
     total_queries = len(context_records)
-    failed_queries = sum(1 for c in context_records if "error" in str(c.get("result", "")).lower() or c.get("status") == "failed")
+    failed_queries = sum(1 for c in context_records if "error" in str(c.get("result", "")).lower() or c.get("status") == "failed" or c.get("trust_level") == "failed")
     successful_queries = total_queries - failed_queries
     
     has_empty_result = False
+    system_verified = []
+    failures = []
+    
     for c in context_records:
         res = c.get("result")
         if not res or (isinstance(res, list) and len(res) == 0):
             has_empty_result = True
-            break
+            
+        trust = c.get("trust_level", "execution_verified")
+        is_err = trust == "failed" or "error" in str(res).lower()
+        
+        preview = str(res)[:200]
+        ev = {
+            "name": c.get("name") or c.get("tool"),
+            "status": "failed" if is_err else "success",
+            "result_preview": preview
+        }
+        if is_err:
+            failures.append(ev)
+        else:
+            system_verified.append(ev)
             
     risk_flags = []
     if failed_queries > 0:
@@ -229,15 +278,12 @@ def build_business_context_observation(context_records: List[Dict[str, Any]], an
         },
         "risk_flags": normalize_risk_flags(risk_flags),
         "evidence": {
-            "business_context_results": [
-                {
-                    "name": c.get("name") or c.get("tool"),
-                    "status": c.get("status", "success" if "error" not in str(c.get("result", "")).lower() else "failed"),
-                    "result_preview": str(c.get("result", ""))[:200]
-                }
-                for c in context_records
-            ]
+            "system_verified_context": system_verified,
+            "failed_context": failures
         },
+        "system_verified": system_verified,
+        "external_unverified": [],
+        "failures": failures,
         "public_answer_ref": "state.final_answer",
         "public_answer_preview": answer[:1500] if answer else "",
     }

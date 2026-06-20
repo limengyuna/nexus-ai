@@ -20,6 +20,9 @@ from app.agent.observation import build_tool_observation
 from app.agent.skills import get_skill, skill_registry
 from app.agent.state import AgentState, ToolCallRecord, append_trace
 from app.agent.tools import get_tool, tool_registry
+from app.agent.tool_result import (
+    NormalizedToolResult, ToolVerification, detect_mcp_error, build_llm_tool_payload
+)
 
 _TOOL_AGENT_SYSTEM_PROMPT = """你是 NexusAI 的工具执行助手。
 
@@ -326,20 +329,35 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 # decision 形如：{"action": "approve"|"reject", "reason": "...", "edited_args": {...}}
                 action = (decision or {}).get("action", "reject")
                 if action != "approve":
-                    # 用户拒绝：把"被拒绝"作为工具结果返回给 LLM，让它继续推理
+                    # 用户拒绝：构造完整的 NormalizedToolResult
                     reject_reason = (decision or {}).get("reason", "用户拒绝执行该工具")
                     tool_result = {"error": f"用户拒绝执行该工具: {reject_reason}"}
+                    
+                    normalized_result = NormalizedToolResult(
+                        ok=False,
+                        status="blocked",
+                        tool_name=tool_name,
+                        tool_type="builtin" if pre_kind == "internal" else pre_kind,
+                        data=None,
+                        error=tool_result["error"],
+                        verification=ToolVerification(
+                            trust_level="failed",
+                            trust_basis="user rejected"
+                        )
+                    )
+                    
                     tool_call_records.append(ToolCallRecord(
                         name=tool_name,
                         kind=pre_kind,
                         arguments=args,
-                        result=tool_result,
+                        result=normalized_result.dict(),
+                        error=normalized_result.error,
                         step=current_step,
                     ))
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": json.dumps(tool_result, ensure_ascii=False),
+                        "content": json.dumps(build_llm_tool_payload(normalized_result), ensure_ascii=False),
                     })
                     logger.info("[Tool Agent] 用户拒绝调用 {}：{}", tool_name, reject_reason)
                     continue  # 跳过本工具，处理下一个
@@ -394,6 +412,21 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                 # 连续 2 次 MCP 失败，提前结束循环，避免反复重试浪费时间
                 if mcp_fail_count >= 2:
                     logger.warning("[Tool Agent] MCP 连续失败 {} 次，提前结束工具调用", mcp_fail_count)
+                    
+                    # 补齐断崖前的记录
+                    normalized_result = NormalizedToolResult(
+                        ok=False, status="failed", tool_name=tool_name, tool_type="mcp",
+                        data=tool_result, error="MCP 连续失败拦截", 
+                        verification=ToolVerification(trust_level="failed", trust_basis="continuous failure")
+                    )
+                    tool_call_records.append(ToolCallRecord(
+                        name=tool_name, kind="mcp_tool", arguments=args, result=normalized_result.dict(), error=normalized_result.error, step=current_step
+                    ))
+                    messages.append({
+                        "role": "tool", "tool_call_id": tc["id"], 
+                        "content": json.dumps(build_llm_tool_payload(normalized_result), ensure_ascii=False)
+                    })
+                    
                     messages.append({"role": "user", "content": "部分外部工具调用失败，请根据已获取的信息直接用中文回答用户问题。"})
                     final_answer, mcp_usage = llm.complete_counted(messages=messages, temperature=0.3)
                     node_tokens += mcp_usage.get("total_tokens", 0)
@@ -420,11 +453,48 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
                         logger.exception("[Tool Agent] 工具 {} 调用失败", tool_name)
                         tool_result = {"error": str(e)}
 
+            # Normalize 过程
+            ok = True
+            error_msg = None
+            trust_level = "external_unverified"
+            
+            if tool_kind == "skill" or tool_kind == "tool":
+                if isinstance(tool_result, dict) and "error" in tool_result:
+                    ok = False
+                    error_msg = tool_result["error"]
+                    trust_level = "failed"
+                else:
+                    trust_level = "execution_verified"
+            elif tool_kind == "mcp_tool":
+                is_err, err_detail = detect_mcp_error(tool_result)
+                if is_err or (isinstance(tool_result, dict) and "error" in tool_result):
+                    ok = False
+                    error_msg = err_detail or (tool_result.get("error") if isinstance(tool_result, dict) else None) or "mcp tool error"
+                    trust_level = "failed"
+                else:
+                    trust_level = "external_unverified"
+
+            normalized_result = NormalizedToolResult(
+                ok=ok,
+                status="completed" if ok else "failed",
+                tool_name=tool_name,
+                tool_type="builtin" if tool_kind == "tool" else "mcp" if tool_kind == "mcp_tool" else "unknown",
+                data=tool_result,
+                error=error_msg,
+                verification=ToolVerification(
+                    trust_level=trust_level,
+                    trust_basis=f"executed via {tool_kind}"
+                )
+            )
+
+            llm_payload = build_llm_tool_payload(normalized_result)
+
             tool_call_records.append(ToolCallRecord(
                 name=tool_name,
                 kind=tool_kind,
                 arguments=args,
-                result=tool_result,
+                result=normalized_result.dict(),
+                error=normalized_result.error if not normalized_result.ok else None,
                 step=current_step,
             ))
 
@@ -432,7 +502,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": json.dumps(tool_result, ensure_ascii=False),
+                "content": json.dumps(llm_payload, ensure_ascii=False),
             })
     else:
         # 超过 MAX_TURNS 还没收敛，强制 LLM 用自然语言总结

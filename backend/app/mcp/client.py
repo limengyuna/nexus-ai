@@ -200,14 +200,19 @@ async def invoke_external_tool(
     async def _impl():
         async with _open_session(config) as session:
             result = await session.call_tool(tool_name, arguments)
-            # result.content 是 list[TextContent | ImageContent | ...]
             contents = []
             for item in result.content:
                 if hasattr(item, "text"):
                     contents.append(item.text)
                 else:
                     contents.append(str(item))
-            return "\n".join(contents) if len(contents) > 1 else (contents[0] if contents else "")
+            
+            joined_text = "\n".join(contents) if len(contents) > 1 else (contents[0] if contents else "")
+            return {
+                "isError": getattr(result, "isError", False),
+                "text": joined_text,
+                "content": [str(c) for c in result.content]
+            }
 
     return await _run_in_proactor_thread(_impl())
 
