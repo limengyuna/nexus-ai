@@ -18,7 +18,8 @@ from loguru import logger
 from app.agent.llm import get_llm_fast
 from app.agent.observation import build_tool_observation
 from app.agent.skills import get_skill, skill_registry
-from app.agent.state import AgentState, ToolCallRecord, append_trace
+from app.agent.state import AgentState, ToolCallRecord, StepOutput, append_trace
+from app.agent.stream_queue import get_queue, with_stream_interceptor
 from app.agent.tools import get_tool, tool_registry
 from app.agent.tool_result import (
     NormalizedToolResult, ToolVerification, detect_mcp_error, build_llm_tool_payload
@@ -145,6 +146,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     user_input = state.get("user_input", "")
     user_id = state.get("user_id")
     token_queue = get_queue(state.get("session_id"))  # 真流式队列（仅 SSE 模式注入）
+    response_mode = state.get("response_mode", "direct")
     llm = get_llm_fast()
 
     # 统一工具池：内部 Tool + MCP 外部工具 + Skill
@@ -170,16 +172,35 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         )
         node_tokens += usage.get("total_tokens", 0)
         # 流式模式：推送答案（不发 done，由 Supervisor 控制）
-        if token_queue:
+        if token_queue and response_mode != "deferred":
             token_queue.put(("chunk", answer))
             
         obs = build_tool_observation([], answer)
+        
+        # 补充 step 信息
+        task_plan = state.get("task_plan", [])
+        current_step = 0
+        for s in task_plan:
+            if s.get("status") == "in_progress":
+                current_step = s.get("step", 0)
+                break
+                
+        step_output = StepOutput(
+            step=current_step or 0,
+            agent="tool_agent",
+            instruction=state.get("supervisor_instruction", ""),
+            status="completed",
+            answer=answer,
+            summary=answer[:200],
+            model_generated=[answer]
+        )
         
         return {
             "final_answer": answer,
             "tool_calls": [],
             "latest_observation": obs,
             "agent_observations": [obs],
+            "step_outputs": [step_output],
             "total_tokens": state.get("total_tokens", 0) + node_tokens,
             "execution_trace": append_trace(
                 state, "tool_agent", started_at,
@@ -489,11 +510,18 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
             llm_payload = build_llm_tool_payload(normalized_result)
 
+            # State 持久化用瘦身版
+            state_result = normalized_result.dict()
+            if "data" in state_result and state_result["data"]:
+                data_str = str(state_result["data"])
+                if len(data_str) > 800:
+                    state_result["data"] = data_str[:800] + "...(truncated)"
+
             tool_call_records.append(ToolCallRecord(
                 name=tool_name,
                 kind=tool_kind,
                 arguments=args,
-                result=normalized_result.dict(),
+                result=state_result,
                 error=normalized_result.error if not normalized_result.ok else None,
                 step=current_step,
             ))
@@ -516,7 +544,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
 
     # 流式模式：推送最终答案（不发 done，由 Supervisor 统一控制）
     def _push_answer():
-        if token_queue and final_answer:
+        if token_queue and final_answer and response_mode != "deferred":
             token_queue.put(("chunk", final_answer))
 
     # 清理 DeepSeek DSML 标记（兜底：防止 LLM 输出原始工具调用 XML）
@@ -541,6 +569,26 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     all_tool_calls = existing_tool_calls + tool_call_records
 
     obs = build_tool_observation(tool_call_records, final_answer)
+    
+    risk_flags = []
+    failures = []
+    for record in tool_call_records:
+        if record.get("error"):
+            failures.append(record["error"])
+        if isinstance(record.get("result"), dict) and record["result"].get("verification", {}).get("trust_level") == "failed":
+            risk_flags.append("tool_execution_failed")
+            
+    step_output = StepOutput(
+        step=current_step or 0,
+        agent="tool_agent",
+        instruction=supervisor_instruction,
+        status="failed" if failures else "completed",
+        answer=final_answer,
+        summary=final_answer[:200],
+        model_generated=[final_answer] if final_answer else [],
+        failures=failures,
+        risk_flags=risk_flags
+    )
 
     return {
         "skill_used": skill_used,
@@ -548,6 +596,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
         "final_answer": final_answer,
         "latest_observation": obs,
         "agent_observations": [obs],
+        "step_outputs": [step_output],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "tool_agent", started_at,
@@ -562,6 +611,7 @@ def _function_calling_loop(state: AgentState, started_at: float) -> Dict[str, An
     }
 
 
+@with_stream_interceptor
 def tool_agent_node(state: AgentState) -> Dict[str, Any]:
     """Tool Agent 入口：统一 Function Calling 决策"""
     started_at = time.time()

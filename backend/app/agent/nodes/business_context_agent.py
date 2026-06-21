@@ -11,8 +11,8 @@ from typing import Any, Dict
 from loguru import logger
 
 from app.agent.llm import get_llm_fast
-from app.agent.state import AgentState, append_trace
-from app.agent.stream_queue import get_queue
+from app.agent.state import AgentState, StepOutput, append_trace
+from app.agent.stream_queue import get_queue, with_stream_interceptor
 from app.agent.tools.business_context import (
     AgentRuntimeContext,
     list_business_context_tools,
@@ -46,6 +46,7 @@ def _select_fallback_tool(text: str) -> str:
     return "get_current_session_summary"
 
 
+@with_stream_interceptor
 def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
     started_at = time.time()
     user_input = state.get("user_input", "")
@@ -54,6 +55,8 @@ def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
     user_id = state.get("user_id")
 
     token_queue = get_queue(session_id)
+    response_mode = state.get("response_mode", "direct")
+    
     if token_queue:
         token_queue.put(("meta", {
             "intent": "business_context",
@@ -167,16 +170,44 @@ def business_context_agent_node(state: AgentState) -> Dict[str, Any]:
         content = resp.get("content")
         final_answer = content if content else "已查阅业务上下文，请见详细数据。"
 
-    if token_queue and final_answer:
+    if token_queue and final_answer and response_mode != "deferred":
         token_queue.put(("chunk", final_answer))
 
     obs = build_business_context_observation(context_records, final_answer)
+    
+    # 补充 step 信息
+    task_plan = state.get("task_plan", [])
+    current_step = 0
+    for s in task_plan:
+        if s.get("status") == "in_progress":
+            current_step = s.get("step", 0)
+            break
+            
+    risk_flags = []
+    failures = []
+    for record in context_records:
+        if record.get("error"):
+            failures.append(record["error"])
+            risk_flags.append("context_retrieval_failed")
+            
+    step_output = StepOutput(
+        step=current_step or 0,
+        agent="business_context_agent",
+        instruction=instruction,
+        status="failed" if failures else "completed",
+        answer=final_answer,
+        summary=final_answer[:200],
+        model_generated=[final_answer] if final_answer else [],
+        failures=failures,
+        risk_flags=risk_flags
+    )
 
     return {
         "final_answer": final_answer,
         "retrieved_business_context": context_records,
         "latest_observation": obs,
         "agent_observations": [obs],
+        "step_outputs": [step_output],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state,

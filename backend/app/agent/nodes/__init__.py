@@ -11,9 +11,14 @@ from app.agent.nodes.supervisor import supervisor_node
 from app.agent.nodes.rag_agent import rag_agent_node
 from app.agent.nodes.tool_agent import tool_agent_node
 
+from app.agent.nodes.business_context_agent import business_context_agent_node
+from app.agent.nodes.synthesis_agent import synthesis_agent_node
+
 __all__ = [
     "context_prep_node",
     "supervisor_node",
     "rag_agent_node",
     "tool_agent_node",
+    "business_context_agent_node",
+    "synthesis_agent_node",
 ]

@@ -29,6 +29,7 @@ from app.agent.state import AgentState, append_trace
 NEXT_RAG = "rag_agent"
 NEXT_TOOL = "tool_agent"
 NEXT_BUSINESS_CONTEXT = "business_context_agent"
+NEXT_SYNTHESIS = "synthesis_agent"
 NEXT_FINISH = "FINISH"
 
 # Supervisor 最大循环次数（防止无限循环）
@@ -170,6 +171,57 @@ def _extract_json(text: str) -> Optional[dict]:
         except (json.JSONDecodeError, ValueError):
             pass
     return None
+
+
+def _decide_response_mode_candidate(plan: List[Dict], user_input: str) -> str:
+    """根据 plan 和用户输入决定 response_mode 候选值"""
+    if not plan:
+        return "direct"
+        
+    if len(plan) >= 2:
+        return "deferred"
+        
+    agents_used = {step.get("agent") for step in plan}
+    if len(agents_used) >= 2:
+        return "deferred"
+        
+    if any(step.get("needs_previous_output") for step in plan):
+        return "deferred"
+        
+    chaining_signals = ["总结", "整理", "报告", "对比", "结论", "综合", "先", "再", "然后", "如果"]
+    if any(signal in user_input for signal in chaining_signals):
+        return "deferred"
+        
+    return "direct"
+
+
+def _check_synthesis_required(state: AgentState, task_plan: List[Dict], user_input: str) -> bool:
+    """所有步骤完成后，决定是否需要交给 synthesis_agent"""
+    if state.get("response_mode") == "direct":
+        return False
+        
+    completed_steps = [s for s in task_plan if s.get("status") == "completed"]
+    if len(completed_steps) >= 2:
+        return True
+        
+    agents_used = {step.get("agent") for step in completed_steps}
+    if len(agents_used) >= 2:
+        return True
+        
+    step_outputs = state.get("step_outputs", [])
+    for out in step_outputs:
+        if out.get("status") in ("failed", "partial"):
+            return True
+        if out.get("risk_flags"):
+            return True
+        if out.get("external_unverified"):
+            return True
+            
+    chaining_signals = ["总结", "整理", "报告", "对比", "结论", "综合"]
+    if any(signal in user_input for signal in chaining_signals):
+        return True
+        
+    return False
 
 
 def supervisor_node(state: AgentState) -> Dict[str, Any]:
@@ -341,6 +393,16 @@ def _planning_phase(
             "status": "pending",
         })
 
+    # Plan Guard 启发式拦截 (仅做高置信记录)
+    for step in valid_plan:
+        agent = step.get("agent")
+        instruction = step.get("instruction", "")
+        # Guard 1: business_context_agent 误报拦截
+        if agent == NEXT_BUSINESS_CONTEXT:
+            keywords = ["账号", "知识库", "工作区", "文档", "状态", "会话", "配置", "我"]
+            if not any(k in instruction or k in user_input for k in keywords):
+                logger.warning(f"[Plan Guard] ⚠️ 发现可疑的分配：意图未包含业务关键字，却分配给 {NEXT_BUSINESS_CONTEXT}。将依赖执行后校验。")
+
     # 编程式打包 step_contexts：
     # - 第一步若 needs_previous_output=true：取对话历史最近一条 assistant 消息（跨轮引用）
     # - 后续步骤的 context 在 _dispatch_step 时用 state.final_answer 动态填充
@@ -381,6 +443,10 @@ def _planning_phase(
 
     # 有 plan → 标记第一步为 in_progress，开始执行
     valid_plan[0]["status"] = "in_progress"
+    
+    response_mode = _decide_response_mode_candidate(valid_plan, user_input)
+    logger.info("[Supervisor] 初始 response_mode 判定: {}", response_mode)
+    
     first_step = valid_plan[0]
     next_agent = first_step["agent"]
     instruction = first_step["instruction"]
@@ -413,12 +479,14 @@ def _planning_phase(
         "supervisor_instruction": instruction,
         "task_plan": valid_plan,
         "step_contexts": step_contexts,
+        "response_mode": response_mode,
+        "response_mode_locked": False,
         "agent_iterations": 1,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "supervisor", started_at,
             input_summary={"user_input": user_input[:80]},
-            output_summary={"next": next_agent, "plan": valid_plan, "tokens": node_tokens},
+            output_summary={"next": next_agent, "plan": valid_plan, "tokens": node_tokens, "mode": response_mode},
         ),
     }
 
@@ -535,10 +603,27 @@ def _execution_phase(
                     "status": "pending",
                 })
         logger.info("[Supervisor] 调整计划，新增 {} 步", len(adjusted))
+        
+        # 重新评估 response_mode
+        new_mode_candidate = _decide_response_mode_candidate(task_plan, user_input)
+        current_mode = state.get("response_mode", "pending")
+        public_answer_started = state.get("public_answer_started", False)
+        
+        dispatch_kwargs = {}
+        if new_mode_candidate == "deferred" and current_mode != "deferred":
+            if not public_answer_started:
+                logger.info("[Supervisor] 调整计划导致 response_mode 升级为 deferred")
+                dispatch_kwargs["response_mode"] = "deferred"
+            else:
+                logger.info("[Supervisor] 调整计划本应升级 deferred，但 public_answer_started=True，锁定 direct")
+                dispatch_kwargs["response_mode_locked"] = True
+        
         # 找到第一个 pending 并执行
         for i, step in enumerate(task_plan):
             if step.get("status") == "pending":
-                return _dispatch_step(state, task_plan, i, token_queue, iterations, started_at, node_tokens)
+                res = _dispatch_step(state, task_plan, i, token_queue, iterations, started_at, node_tokens)
+                res.update(dispatch_kwargs)
+                return res
         # 调整后也没有 pending 了
         return _finish_done(state, task_plan, token_queue, iterations, started_at, node_tokens, "调整后无待执行步骤")
 
@@ -640,6 +725,14 @@ def _finish_done(
             if step.get("status") in ("pending", "in_progress"):
                 step["status"] = "completed"
 
+    synthesis_required = False
+    if not cancelled:
+        synthesis_required = _check_synthesis_required(state, task_plan, state.get("user_input", ""))
+        
+    next_node = NEXT_SYNTHESIS if synthesis_required else NEXT_FINISH
+    if synthesis_required:
+        logger.info("[Supervisor._finish_done] 经检查，任务需要交接给 Synthesis Agent 总结")
+
     # 确定最终 intent（取最后一个 completed 步骤的 agent 类型）
     last_agent = ""
     for step in reversed(task_plan):
@@ -701,24 +794,42 @@ def _finish_done(
 
     # 推送 chunks（如果 final_answer 是兜底/取消占位拿到的，需要主动推给前端）
     if token_queue:
-        # 仅当 state 中原本没有 final_answer（即兜底/取消场景）时才推 chunk
-        # 正常路径下 tool_agent 已经推过 chunk 了，避免重复推
-        if final_answer and not (state.get("final_answer", "") or ""):
-            token_queue.put(("chunk", final_answer))
-        elif cancelled:
-            # 取消场景必须强制推送占位文案，覆盖前端 chat 框（即使 state 中有部分 final_answer）
-            # 前端 assistantRef.content 之前可能累积了部分 LLM 输出，append cancel_msg 让用户看到状态
-            token_queue.put(("chunk", "\n\n" + final_answer if state.get("final_answer") else final_answer))
-        # 推送最终 task_plan 状态（含 cancelled 标记），让前端渲染中断信息
-        token_queue.put(("meta", {
-            "intent": intent,
-            "route_reason": reason or ("用户中断" if cancelled else "所有步骤已完成"),
-            "task_plan": task_plan,
-        }))
-        token_queue.put(("done", None))
+        if synthesis_required:
+            # 交接给 synthesis_agent，推送 meta，不推 done，不推 chunk
+            token_queue.put(("meta", {
+                "intent": intent,
+                "route_reason": "准备生成最终总结",
+                "task_plan": task_plan,
+            }))
+        else:
+            # 仅当 state 中原本没有 final_answer（即兜底/取消场景）时才推 chunk
+            # 正常路径下 tool_agent 已经推过 chunk 了，避免重复推
+            # 修复 7: 如果是 deferred 模式且最终不需要 synthesis，则子Agent没有推流，我们需要在这里进行 fallback 推流
+            response_mode = state.get("response_mode", "direct")
+            if final_answer and not (state.get("final_answer", "") or ""):
+                token_queue.put(("chunk", final_answer))
+            elif response_mode == "deferred" and not cancelled:
+                logger.info("[Supervisor] Deferred 模式无需 Synthesis，触发组装式兜底推流")
+                fallback_text = "\n\n".join([f"**步骤 {s.get('step')} ({s.get('agent')})**:\n{s.get('answer') or s.get('summary')}" for s in state.get("step_outputs", [])])
+                token_queue.put(("chunk", fallback_text))
+                final_answer = fallback_text  # 同步赋值给 final_answer，保证落库一致
+            elif cancelled:
+                # 取消场景必须强制推送占位文案，覆盖前端 chat 框（即使 state 中有部分 final_answer）
+                # 前端 assistantRef.content 之前可能累积了部分 LLM 输出，append cancel_msg 让用户看到状态
+                fallback_text = "\n\n" + final_answer if state.get("final_answer") else final_answer
+                token_queue.put(("chunk", fallback_text))
+                final_answer = fallback_text  # 同步赋值
+            # 推送最终 task_plan 状态（含 cancelled 标记），让前端渲染中断信息
+            token_queue.put(("meta", {
+                "intent": intent,
+                "route_reason": reason or ("用户中断" if cancelled else "所有步骤已完成"),
+                "task_plan": task_plan,
+            }))
+            token_queue.put(("done", None))
 
     return {
-        "next_agent": NEXT_FINISH,
+        "next_agent": next_node,
+        "synthesis_required": synthesis_required,
         "intent": intent,
         "route_reason": reason,
         "task_plan": task_plan,
@@ -728,7 +839,7 @@ def _finish_done(
         "execution_trace": append_trace(
             state, "supervisor", started_at,
             input_summary={"iteration": iterations, "cancelled": cancelled},
-            output_summary={"next": NEXT_FINISH, "reason": reason, "tokens": node_tokens},
+            output_summary={"next": next_node, "reason": reason, "tokens": node_tokens, "synthesis": synthesis_required},
         ),
     }
 

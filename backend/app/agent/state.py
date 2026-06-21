@@ -82,6 +82,32 @@ class BusinessContextRecord(TypedDict, total=False):
     trust_level: str
 
 
+class StepOutput(TypedDict, total=False):
+    step: int
+    agent: str
+    instruction: str
+    status: str
+    answer: str
+    summary: str
+    evidence_refs: List[Dict[str, Any]]
+    evidence_preview: List[Dict[str, Any]]
+    artifacts: List[Dict[str, Any]]
+    system_verified: List[Dict[str, Any]]
+    external_unverified: List[Dict[str, Any]]
+    inferred: List[Dict[str, Any]]
+    model_generated: List[str]
+    failures: List[str]
+    risk_flags: List[str]
+
+
+class SynthesisClaim(TypedDict, total=False):
+    text: str
+    source_step_ids: List[int]
+    evidence_refs: List[Dict[str, Any]]
+    trust_level: str
+    risk_flags: List[str]
+
+
 class AgentObservation(TypedDict, total=False):
     """分层结果契约：子 Agent 返回给 Supervisor 的结构化执行信号"""
     agent: str
@@ -144,6 +170,14 @@ class AgentState(TypedDict, total=False):
     # ---------- 分层结果契约 ----------
     agent_observations: Annotated[List[AgentObservation], operator.add]
     latest_observation: Optional[AgentObservation]
+    
+    # ---------- Synthesis 架构支持 ----------
+    step_outputs: Annotated[List[StepOutput], operator.add]
+    response_mode: str                         # "pending", "direct", "deferred"
+    public_answer_started: bool
+    response_mode_locked: bool
+    synthesis_required: bool
+    synthesis_completed: bool
 
     # ---------- 可观测性 ----------
     execution_trace: List[TraceStep]           # 节点执行链路追踪
@@ -206,6 +240,12 @@ def make_initial_state(
         last_task_plan_meta=None,
         agent_observations=[],
         latest_observation=None,
+        step_outputs=[],
+        response_mode="pending",
+        public_answer_started=False,
+        response_mode_locked=False,
+        synthesis_required=False,
+        synthesis_completed=False,
     )
 
 

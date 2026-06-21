@@ -19,12 +19,13 @@ from sqlalchemy.orm import Session
 
 from app.agent.llm import get_llm_fast
 from app.agent.observation import build_rag_observation
-from app.agent.state import AgentState, FaithfulnessClaim, FaithfulnessResult, RetrievedDoc, append_trace
+from app.agent.state import AgentState, FaithfulnessClaim, FaithfulnessResult, RetrievedDoc, StepOutput, append_trace
 from app.core.database import SessionLocal
 from app.models.knowledge_base import KnowledgeBase
 from app.rag.embedder import get_embedder
 from app.rag.reranker import get_reranker
 from app.rag.vector_store import get_vector_store
+from app.agent.stream_queue import get_queue, with_stream_interceptor
 
 # 初始粗召回数量（送入 Reranker 的候选数）
 RETRIEVAL_TOP_K = 15
@@ -333,6 +334,7 @@ def _multi_query_retrieve(vector_store, embedder, collection_name: str, queries:
     return sorted(merged.values(), key=lambda h: h.score)
 
 
+@with_stream_interceptor
 def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     """RAG Agent：检索 + 生成"""
     started_at = time.time()
@@ -352,12 +354,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     step_contexts = state.get("step_contexts", {}) or {}
     current_step_context = step_contexts.get(current_step, "") if current_step else ""
 
-    from app.agent.stream_queue import get_queue
-    token_queue = get_queue(state.get("session_id"))  # 提前取出，所有路径都可能需要
+    token_queue = get_queue(state.get("session_id"))
+    response_mode = state.get("response_mode", "direct")
 
     def _push_early_return(answer: str):
         """early return 时推送 chunk（不发 done，由 Supervisor 统一控制）"""
-        if token_queue:
+        if token_queue and response_mode != "deferred":
             token_queue.put(("chunk", answer))
 
     if kb_id is None:
@@ -366,10 +368,15 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         msg = "未指定知识库，无法进行知识库问答。"
         _push_early_return(msg)
         obs = build_rag_observation([], None, msg, is_error=True)
+        step_output = StepOutput(
+            step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+            status="failed", answer=msg, summary=msg, failures=[msg]
+        )
         return {
             "final_answer": msg,
             "latest_observation": obs,
             "agent_observations": [obs],
+            "step_outputs": [step_output],
             "execution_trace": append_trace(
                 state, "rag_agent", started_at,
                 error="no kb_id",
@@ -384,10 +391,15 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             msg = f"知识库 #{kb_id} 不存在或未初始化。"
             _push_early_return(msg)
             obs = build_rag_observation([], None, msg, is_error=True)
+            step_output = StepOutput(
+                step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+                status="failed", answer=msg, summary=msg, failures=[msg]
+            )
             return {
                 "final_answer": msg,
                 "latest_observation": obs,
                 "agent_observations": [obs],
+                "step_outputs": [step_output],
                 "execution_trace": append_trace(
                     state, "rag_agent", started_at,
                     error=f"kb {kb_id} missing",
@@ -423,10 +435,15 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         msg = f"检索知识库时出错: {e}"
         _push_early_return(msg)
         obs = build_rag_observation([], None, msg, is_error=True)
+        step_output = StepOutput(
+            step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+            status="failed", answer=msg, summary=msg, failures=[msg]
+        )
         return {
             "final_answer": msg,
             "latest_observation": obs,
             "agent_observations": [obs],
+            "step_outputs": [step_output],
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
 
@@ -464,11 +481,16 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         msg = "在当前知识库中未找到相关内容。"
         _push_early_return(msg)
         obs = build_rag_observation([], None, msg)
+        step_output = StepOutput(
+            step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+            status="completed", answer=msg, summary=msg
+        )
         return {
             "retrieved_docs": [],
             "final_answer": msg,
             "latest_observation": obs,
             "agent_observations": [obs],
+            "step_outputs": [step_output],
             "execution_trace": append_trace(
                 state, "rag_agent", started_at,
                 input_summary={"query": user_input[:60], "kb_id": kb_id},
@@ -547,7 +569,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             chunks: list[str] = []
             for tok in llm.complete_stream(messages=rag_messages, temperature=0.3, max_tokens=1200):
                 chunks.append(tok)
-                token_queue.put(("chunk", tok))
+                if response_mode != "deferred":
+                    token_queue.put(("chunk", tok))
             answer = "".join(chunks)
             # 流式模式粗估 token
             try:
@@ -567,14 +590,20 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("[RAG Agent] LLM 生成失败: {}", e)
         err_msg = f"生成回答时出错: {e}"
-        if token_queue:
+        if token_queue and response_mode != "deferred":
             token_queue.put(("chunk", err_msg))
         obs = build_rag_observation(retrieved_docs, None, err_msg, is_error=True)
+        step_output = StepOutput(
+            step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+            status="failed", answer=err_msg, summary=err_msg, failures=[err_msg],
+            evidence_refs=[d.get("metadata", {}) for d in retrieved_docs]
+        )
         return {
             "retrieved_docs": retrieved_docs,
             "final_answer": err_msg,
             "latest_observation": obs,
             "agent_observations": [obs],
+            "step_outputs": [step_output],
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
     finally:
@@ -609,7 +638,24 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         )
         node_tokens += faith_tokens
 
+    # 状态瘦身：截断持久化对象中的完整原文，防止 Checkpointer 状态膨胀
+    for d in retrieved_docs:
+        if "content" in d and len(str(d["content"])) > 500:
+            d["content"] = str(d["content"])[:500] + "...(truncated)"
+            
     obs = build_rag_observation(retrieved_docs, faithfulness_result, answer)
+    
+    risk_flags = []
+    if faithfulness_result and faithfulness_result.get("score", 1.0) < 0.5:
+        risk_flags.append("unfaithful")
+        
+    step_output = StepOutput(
+        step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
+        status="completed", answer=answer, summary=answer[:200],
+        evidence_refs=[d.get("metadata", {}) for d in retrieved_docs if d.get("adopted", False)],
+        model_generated=[answer],
+        risk_flags=risk_flags
+    )
 
     return {
         "retrieved_docs": retrieved_docs,
@@ -617,6 +663,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         "final_answer": answer,
         "latest_observation": obs,
         "agent_observations": [obs],
+        "step_outputs": [step_output],
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
             state, "rag_agent", started_at,
