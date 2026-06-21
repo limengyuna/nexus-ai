@@ -795,10 +795,21 @@ def _finish_done(
     # 推送 chunks（如果 final_answer 是兜底/取消占位拿到的，需要主动推给前端）
     if token_queue:
         if synthesis_required:
+            # 动态追加一个 "信息整合" 的步骤，并新建 list 以确保 LangGraph 识别到状态变更！
+            task_plan = list(task_plan)
+            synthesis_step = {
+                "step": len(task_plan) + 1,
+                "agent": "synthesis_agent",
+                "instruction": "整合各节点的上下文，深度分析并生成最终方案",
+                "status": "in_progress",
+                "needs_previous_output": True
+            }
+            task_plan.append(synthesis_step)
+            
             # 交接给 synthesis_agent，推送 meta，不推 done，不推 chunk
             token_queue.put(("meta", {
                 "intent": intent,
-                "route_reason": "准备生成最终总结",
+                "route_reason": reason,
                 "task_plan": task_plan,
             }))
         else:

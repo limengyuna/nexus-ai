@@ -22,6 +22,7 @@ function formatArgs(args: any): string {
 // 展开状态
 const expandedTools = ref(false)
 const expandedDocs = ref<Set<number>>(new Set())
+const expandedGlobalDocs = ref(false)
 const expandedBusinessContext = ref(false)
 const expandedFaithClaims = ref(false)
 
@@ -110,7 +111,11 @@ const effectiveHitsCount = computed(() => {
 
     <!-- ========== 全局明细折叠面板：RAG 检索结果 ========== -->
     <section v-if="chat.lastRetrievedDocs.length > 0">
-      <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5">
+      <div
+        class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200"
+        @click="expandedGlobalDocs = !expandedGlobalDocs"
+      >
+        <component :is="expandedGlobalDocs ? ChevronDown : ChevronRight" :size="12" />
         <BookOpen :size="12" />
         全局知识检索
         <span class="text-gray-400 dark:text-gray-500 font-normal">({{ chat.lastRetrievedDocs.length }} 段)</span>
@@ -118,7 +123,7 @@ const effectiveHitsCount = computed(() => {
           父块回溯合并 → 实际 {{ effectiveHitsCount }} 段送入 LLM
         </span>
       </div>
-      <div class="space-y-2">
+      <div v-if="expandedGlobalDocs" class="space-y-2 animate-slide-down">
         <div
           v-for="(doc, i) in chat.lastRetrievedDocs.slice(0, 5)"
           :key="i"

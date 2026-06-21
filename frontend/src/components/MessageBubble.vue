@@ -100,14 +100,9 @@ const shortTime = computed(() => {
 <template>
   <div v-if="isUser || message.content" class="group flex" :class="isUser ? 'justify-end' : 'justify-start'">
     <div class="max-w-3xl flex flex-col" :class="isUser ? 'items-end' : 'items-start'">
-      <!-- 来源标签 -->
-      <div v-if="sourceLabel" class="text-xs text-gray-400 dark:text-gray-500 mb-1 px-1">
-        {{ sourceLabel }}
-      </div>
-
       <!-- 气泡内容 -->
       <div
-        class="rounded-2xl px-5 py-3.5 shadow-sm break-words text-[15px] leading-relaxed transition-all duration-200"
+        class="min-h-[44px] rounded-2xl px-5 py-3.5 shadow-sm break-words text-[15px] leading-relaxed transition-all duration-200"
         :class="isUser
           ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-sm shadow-zinc-200/50 dark:shadow-none'
           : 'bg-white dark:bg-zinc-900/80 border border-zinc-100 dark:border-zinc-800/80 text-zinc-800 dark:text-zinc-100 rounded-bl-sm'"

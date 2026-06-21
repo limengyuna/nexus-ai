@@ -3,6 +3,7 @@ import { nextTick, ref, watch } from 'vue'
 import { ArrowDown, MessageSquare, Sparkles } from 'lucide-vue-next'
 import type { ChatMessage } from '@/api/chat'
 import MessageBubble from '@/components/MessageBubble.vue'
+import ImmersiveThinkingPanel from './ImmersiveThinkingPanel.vue'
 
 const props = defineProps<{
   activeSessionId: number | null
@@ -66,21 +67,9 @@ watch(
           @regenerate="$emit('regenerate')"
         />
         
-        <!-- Agent 正在思考中 -->
-        <div v-if="sending && !messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start">
-          <div class="bg-white dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 rounded-md rounded-bl-md px-4 py-3 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-3 shadow-sm">
-            <span class="inline-flex gap-1">
-              <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0s"></span>
-              <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
-              <span class="w-1.5 h-1.5 bg-zinc-1000 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
-            </span>
-            <span class="font-semibold">智能体正在思考多步协作方案...</span>
-            <button
-              class="text-[10px] px-2 py-0.5 rounded-sm border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-bold active:scale-95"
-              title="停止生成"
-              @click="$emit('stop-generating')"
-            >停止</button>
-          </div>
+        <!-- Agent 正在思考中 (沉浸式思考面板) -->
+        <div v-if="sending && !messages.some(m => m.role === 'assistant' && m.id < 0 && m.content)" class="flex justify-start w-full max-w-3xl">
+          <ImmersiveThinkingPanel />
         </div>
       </template>
     </div>

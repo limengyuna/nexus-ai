@@ -165,8 +165,16 @@ def synthesis_agent_node(state: AgentState) -> Dict[str, Any]:
         # 因为这是最后一站，我们发送 done
         token_queue.put(("done", None))
         
+    # 更新 task_plan 状态
+    task_plan = list(state.get("task_plan", []))
+    if task_plan and task_plan[-1].get("agent") == "synthesis_agent":
+        last_step = dict(task_plan[-1])
+        last_step["status"] = "completed"
+        task_plan[-1] = last_step
+    
     return {
         "final_answer": final_answer,
+        "task_plan": task_plan,
         "synthesis_completed": True,
         "total_tokens": state.get("total_tokens", 0) + node_tokens,
         "execution_trace": append_trace(
