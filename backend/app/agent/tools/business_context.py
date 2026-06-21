@@ -3,6 +3,7 @@
 允许 Tool Agent 读取当前登录用户在系统内的业务上下文信息，但不暴露任意 SQL 查询权限。
 """
 from dataclasses import dataclass
+import json
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -341,9 +342,124 @@ class MCPServerOverviewTool(BusinessContextTool):
             db.close()
 
 
+# -----------------------------------------------------------------------------
+# 5. get_knowledge_base_documents
+# -----------------------------------------------------------------------------
+class KnowledgeBaseDocumentsArgs(BaseModel):
+    kb_ids: List[int] = Field(description="[必填] 要查询的知识库 ID 列表。例如: [24, 25]。如果只查一个也请放在列表中，如 [24]。绝不能省略此参数！")
+    limit: int = Field(default=10, description="返回的最大文档数量，最大50")
+    offset: int = Field(default=0, description="分页偏移量")
+    status: Optional[str] = Field(default=None, description="按处理状态过滤，例如：completed, failed, processing 等")
+    keyword: Optional[str] = Field(default=None, description="按文件名模糊搜索关键词")
+
+
+class KnowledgeBaseDocumentsTool(BusinessContextTool):
+    name = "get_knowledge_base_documents"
+    description = (
+        "获取当前用户指定知识库下的具体文档列表。"
+        "必须明确提供 kb_ids 列表来查询特定的知识库。如果不知道目标知识库的 ID，必须先调用 get_knowledge_base_overview 工具查询以获取它，绝不能凭空猜测或省略 kb_ids 参数。"
+    )
+    args_schema = KnowledgeBaseDocumentsArgs
+
+    def run_with_context(self, arguments: Dict[str, Any], context: AgentRuntimeContext) -> Any:
+        if not context.user_id:
+            return {"error": "缺少用户上下文，无法查询知识库文档"}
+
+        kb_ids = self._normalize_kb_ids(arguments)
+
+        if not kb_ids:
+            return {"error": "缺少必填参数 kb_ids：请明确指定要查询的知识库 ID 列表"}
+
+        limit = min(arguments.get("limit", 10), 50)
+        offset = max(arguments.get("offset", 0), 0)
+        status = arguments.get("status")
+        keyword = arguments.get("keyword")
+
+        db = SessionLocal()
+        try:
+            # 校验指定知识库的所有权，过滤掉越权或不存在的 ID
+            valid_kbs = db.query(KnowledgeBase.id).filter(
+                KnowledgeBase.id.in_(kb_ids),
+                KnowledgeBase.created_by == context.user_id
+            ).all()
+            valid_kb_ids = [k.id for k in valid_kbs]
+            
+            if not valid_kb_ids:
+                return {"error": f"指定的知识库(IDs: {kb_ids})均不存在或无权访问"}
+
+            query = db.query(Document).filter(Document.kb_id.in_(valid_kb_ids))
+
+            if status:
+                try:
+                    # 尝试转换枚举，如果不匹配直接用字符串过滤可能报错
+                    status_enum = DocumentStatus(status)
+                    query = query.filter(Document.status == status_enum)
+                except ValueError:
+                    return {"error": f"无效的文档状态: {status}"}
+                    
+            if keyword:
+                search_term = f"%{keyword[:100]}%"
+                query = query.filter(Document.file_name.ilike(search_term))
+            
+            total_count = query.count()
+            docs = query.order_by(Document.created_at.desc()).offset(offset).limit(limit).all()
+
+            items = []
+            for d in docs:
+                items.append({
+                    "id": d.id,
+                    "kb_id": d.kb_id,
+                    "file_name": d.file_name,
+                    "file_type": d.file_type,
+                    "file_size": d.file_size,
+                    "status": d.status.value,
+                    "chunk_count": d.chunk_count,
+                    "error_msg": d.error_msg,
+                    "created_at": d.created_at.isoformat() if d.created_at else None
+                })
+
+            return {
+                "total": total_count,
+                "items": items
+            }
+        except Exception as e:
+            logger.error("查询知识库文档失败: {}", e)
+            return {"error": str(e)}
+        finally:
+            db.close()
+
+    @staticmethod
+    def _normalize_kb_ids(arguments: Dict[str, Any]) -> List[int]:
+        raw_values = arguments.get("kb_ids")
+        if raw_values is None:
+            raw_values = arguments.get("kb_id")
+
+        if isinstance(raw_values, str):
+            try:
+                parsed = json.loads(raw_values)
+                raw_values = parsed
+            except json.JSONDecodeError:
+                raw_values = [raw_values]
+        elif isinstance(raw_values, int):
+            raw_values = [raw_values]
+
+        if not isinstance(raw_values, list):
+            return []
+
+        kb_ids: List[int] = []
+        for value in raw_values:
+            if isinstance(value, int):
+                kb_ids.append(value)
+            elif isinstance(value, str) and value.strip().isdigit():
+                kb_ids.append(int(value.strip()))
+
+        return list(dict.fromkeys(kb_ids))
+
+
 _BUSINESS_CONTEXT_TOOLS = [
     WorkspaceSummaryTool(),
     KnowledgeBaseOverviewTool(),
+    KnowledgeBaseDocumentsTool(),
     CurrentSessionSummaryTool(),
     MCPServerOverviewTool(),
 ]

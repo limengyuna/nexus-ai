@@ -226,7 +226,13 @@ def build_tool_observation(tool_calls: List[Dict[str, Any]], answer: str) -> Dic
 
 def build_business_context_observation(context_records: List[Dict[str, Any]], answer: str) -> Dict[str, Any]:
     total_queries = len(context_records)
-    failed_queries = sum(1 for c in context_records if "error" in str(c.get("result", "")).lower() or c.get("status") == "failed" or c.get("trust_level") == "failed")
+    def _is_failed_record(record: Dict[str, Any]) -> bool:
+        if record.get("trust_level") == "failed" or record.get("status") == "failed" or record.get("error"):
+            return True
+        result = record.get("result")
+        return isinstance(result, dict) and bool(result.get("error"))
+
+    failed_queries = sum(1 for c in context_records if _is_failed_record(c))
     successful_queries = total_queries - failed_queries
     
     has_empty_result = False
@@ -239,7 +245,7 @@ def build_business_context_observation(context_records: List[Dict[str, Any]], an
             has_empty_result = True
             
         trust = c.get("trust_level", "execution_verified")
-        is_err = trust == "failed" or "error" in str(res).lower()
+        is_err = _is_failed_record(c) or trust == "failed"
         
         preview = str(res)[:200]
         ev = {
