@@ -149,7 +149,7 @@ def _check_faithfulness(
     try:
         raw, usage = llm.complete_counted(
             messages=[{"role": "user", "content": _FAITHFULNESS_PROMPT.format(
-                sources=sources_text, answer=answer[:1500],  # 回答也截断以控制成本
+                sources=sources_text, answer=answer,  # 不截断回答，保证所有 claims 都能被校验
             )}],
             temperature=0,
             max_tokens=800,
