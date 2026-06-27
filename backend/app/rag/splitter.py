@@ -96,6 +96,7 @@ class MarkdownHeaderSplitter(BaseSplitter):
         chunk_size: int = 800,
         chunk_overlap: int = 80,
         min_chunk_chars: int = 200,
+        parent_chunk_size: int = 2500,
     ):
         from langchain_text_splitters import (
             MarkdownHeaderTextSplitter,
@@ -117,8 +118,16 @@ class MarkdownHeaderSplitter(BaseSplitter):
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", "。", "！", "？", "；", " ", ""],
         )
+        # 父块切分器：无 overlap，按自然语言边界将超长标题内容切成多个父块
+        # 父块只用于生成时提供上下文，不进行向量检索，因此无需 overlap
+        self._parent_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=parent_chunk_size,
+            chunk_overlap=0,
+            separators=["\n\n", "\n", "。", "！", "？", "；", " ", ""],
+        )
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.parent_chunk_size = parent_chunk_size
         # 最小块字符数：低于此阈值的小块会尝试与相邻块合并
         # 用于解决中文 PDF / DOCX 中 Unstructured 误把正文段落识别为 Title 导致的过度碎片化
         self.min_chunk_chars = min_chunk_chars
@@ -129,24 +138,43 @@ class MarkdownHeaderSplitter(BaseSplitter):
 
         # ---------- 第二阶段：把每个 md_doc 转成原始候选块 ----------
         # 候选块结构：{content, header_path, parent_content}
+        #
+        # 分层切分策略：
+        # 1. 若标题下的内容 <= parent_chunk_size，整体作为一个父块，再切子块（原有逻辑）
+        # 2. 若标题下的内容 > parent_chunk_size，先用 parent_splitter 切成多个父块（无 overlap），
+        #    再在每个父块内用 sub_splitter 切子块。
+        #    每个子块只记录所在父块的内容（<= parent_chunk_size），
+        #    保证 parent_content 有上限，避免 ChromaDB metadata 过大。
         raw_candidates: List[Dict] = []
         for md_doc in md_docs:
             header_path = " > ".join(
                 str(v) for k, v in md_doc.metadata.items() if k.startswith("h")
             )
-            parent_content = md_doc.page_content
+            full_content = md_doc.page_content
 
-            # 长块再用递归切分（child 级别）
-            sub_pieces = self._sub_splitter.split_text(parent_content)
-            has_children = len(sub_pieces) > 1
+            # 如果内容超过父块上限，先切父块；否则整体作为一个父块
+            if len(full_content) > self.parent_chunk_size:
+                parent_blocks = self._parent_splitter.split_text(full_content)
+                logger.debug(
+                    "MarkdownHeaderSplitter: 标题块 {} 字 > 父块上限 {} 字，切分为 {} 个父块",
+                    len(full_content), self.parent_chunk_size, len(parent_blocks),
+                )
+            else:
+                parent_blocks = [full_content]
 
-            for piece in sub_pieces:
-                raw_candidates.append({
-                    "content": piece,
-                    "header_path": header_path or "(no-header)",
-                    # 只有被切分过的才有 parent_content
-                    "parent_content": parent_content if has_children else None,
-                })
+            for parent_block in parent_blocks:
+                # 在父块内部切子块（child 级别）
+                sub_pieces = self._sub_splitter.split_text(parent_block)
+                has_children = len(sub_pieces) > 1
+
+                for piece in sub_pieces:
+                    raw_candidates.append({
+                        "content": piece,
+                        "header_path": header_path or "(no-header)",
+                        # 只有父块内被进一步切分时才记录 parent_content
+                        # parent_block 字数 <= parent_chunk_size，ChromaDB metadata 安全
+                        "parent_content": parent_block if has_children else None,
+                    })
 
         # ---------- 第三阶段：贪心合并小块 ----------
         # 规则：若当前累积块字符数 < min_chunk_chars，

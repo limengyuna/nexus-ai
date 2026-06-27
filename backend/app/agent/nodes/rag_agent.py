@@ -142,7 +142,7 @@ def _check_faithfulness(
     source_parts = []
     for i, d in enumerate(effective_docs, 1):
         src = d.get("metadata", {}).get("file_name", "未知来源")
-        content = d.get("content", "")[:600]  # 截断单条资料至 600 字，避免 prompt 过长
+        content = d.get("content", "")[:2500]  # 截断上限与父块 parent_chunk_size 对齐（2500 字）
         source_parts.append(f"[资料 #{i} | {src}]\n{content}")
     sources_text = "\n\n".join(source_parts)
 
