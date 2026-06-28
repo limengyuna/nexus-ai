@@ -57,7 +57,7 @@ def select_review_mode(observation: Dict[str, Any], step: Dict[str, Any]) -> str
     if status == "partial":
         return "evidence"
 
-    if observation.get("external_unverified"):
+    if observation.get("evidence", {}).get("external_unverified_tools"):
         return "evidence"
 
     if observation.get("risk_flags"):
@@ -216,9 +216,6 @@ def build_tool_observation(tool_calls: List[Dict[str, Any]], answer: str) -> Dic
             "external_unverified_tools": external_unverified,
             "failed_tools": failures
         },
-        "system_verified": system_verified,
-        "external_unverified": external_unverified,
-        "failures": failures,
         "public_answer_ref": "state.final_answer",
         "public_answer_preview": answer[:1500] if answer else "",
     }
@@ -287,9 +284,6 @@ def build_business_context_observation(context_records: List[Dict[str, Any]], an
             "system_verified_context": system_verified,
             "failed_context": failures
         },
-        "system_verified": system_verified,
-        "external_unverified": [],
-        "failures": failures,
         "public_answer_ref": "state.final_answer",
         "public_answer_preview": answer[:1500] if answer else "",
     }
