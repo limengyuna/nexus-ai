@@ -88,9 +88,29 @@ def _build_planning_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
 只输出 JSON，不要任何其他文字。"""
 
 
-def _build_step_check_prompt() -> str:
-    """构建步骤检查 prompt（子 Agent 完成后使用）"""
-    return """你是 NexusAI 的 Supervisor。上一步任务已完成，请决定下一步行动。
+def _build_step_check_prompt(has_kb: bool, mcp_info: List[Dict[str, str]]) -> str:
+    """构建步骤检查 prompt（子 Agent 完成后使用）
+
+    与规划阶段共享可用能力描述，确保 adjust 时 LLM 有足够的上下文
+    来生成合理的调整计划。
+    """
+    # 复用规划阶段的能力描述构建逻辑
+    capabilities = ", ".join(f"{s['name']}({s['description']})" for s in skill_registry.to_choices_for_router())
+    kb_section = "- **rag_agent**：从知识库检索文档并生成回答" if has_kb else "- **rag_agent**：不可用（用户未关联知识库）"
+    if mcp_info:
+        mcp_lines = "；外部工具(MCP)：" + "、".join(
+            f"{m['name']}({m['description']})" if m['description'] else m['name']
+            for m in mcp_info
+        )
+    else:
+        mcp_lines = ""
+
+    return f"""你是 NexusAI 的 Supervisor。上一步任务已完成，请决定下一步行动。
+
+## 可用子 Agent
+{kb_section}
+- **tool_agent**：执行工具和技能（{capabilities}）{mcp_lines}
+- **business_context_agent**：查询用户系统内的业务状态
 
 ## 规则
 - 如果当前 plan 中还有待执行步骤，继续执行下一步
@@ -98,7 +118,7 @@ def _build_step_check_prompt() -> str:
 - 如果所有步骤都已完成，选择 FINISH
 
 ## 输出格式（严格 JSON）
-{"action": "next|adjust|finish", "reason": "简短理由", "instruction": "给下一个Agent的指令（finish时留空）", "adjusted_plan": [{"step": N, "agent": "...", "instruction": "...", "needs_previous_output": false}]}
+{{"action": "next|adjust|finish", "reason": "简短理由", "instruction": "给下一个Agent的指令（finish时留空）", "adjusted_plan": [{{"step": N, "agent": "...", "instruction": "...", "needs_previous_output": false}}]}}
 
 - action=next：按原计划执行下一步
 - action=adjust：调整剩余计划（用 adjusted_plan 替换剩余步骤）
@@ -523,7 +543,10 @@ def _execution_phase(
 
     # 如果已经没有 pending 步骤，直接看 LLM 是否需要调整
     # 构建 step-check messages
-    system_prompt = _build_step_check_prompt()
+    # 共享可用能力描述，确保 adjust 时 LLM 了解所有可用的子 Agent 和工具
+    has_kb = state.get("kb_id") is not None
+    mcp_info = _get_mcp_info(state.get("user_id"))
+    system_prompt = _build_step_check_prompt(has_kb, mcp_info)
     plan_summary = json.dumps(task_plan, ensure_ascii=False, indent=2)
 
     # ---------------- 动态上下文读取 (分层结果契约) ----------------
