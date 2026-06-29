@@ -83,7 +83,7 @@ _RAG_SYSTEM_PROMPT = """你是 NexusAI 知识库问答助手。请基于下面�
 3. 如果资料只部分覆盖了问题，先详细回答已有部分，再简要说明哪些方面资料中未提及
 4. 只有在资料与问题**完全无关**时，才说"根据已有资料无法回答"
 5. 回答详细专业，使用中文，善用列表和分点组织信息
-6. 在回答末尾用括号标注你实际使用了哪些资料，格式为"（参考资料：资料 #1、资料 #3）"，只列出你确实引用了内容的资料编号
+6. 请在你回答的**每一个关键事实句子的末尾**（而不是整个回答的最末尾），严格使用 [资料 #N] 的格式标明具体的信息来源。对于你自己生成的连接性或过渡性语句，**绝对不要**添加任何资料编号
 7. **多文档场景**：如果参考资料来自不同的文档/来源，必须分别列出每篇文档的相关内容，不要只回答其中一篇而忽略其他
 
 安全规则（绝对优先）：
@@ -528,6 +528,11 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             len(retrieved_docs), len(effective_docs),
         )
 
+    # 保存合并前长度用于 trace 统计
+    original_retrieved_count = len(retrieved_docs)
+    # 核心基准统一：用合并去重后的 effective_docs 彻底覆盖 retrieved_docs，确保前后端与校验引用的索引严格 1:1 对齐
+    retrieved_docs = effective_docs
+
     # ---------- 2. 拼装上下文 ----------
     # 每段编号 + 来源标注，便于 LLM 引用
     ctx_parts = []
@@ -610,44 +615,105 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
         # Supervisor 架构：RAG Agent 不发 done 信号，由 Supervisor 统一控制流程结束
         pass
 
-    # ---------- 4. 根据 LLM 回答中的引用标记 adopted ----------
-    # 解析 LLM 回答中的 "资料 #N" 引用，标记被实际使用的 chunk
+    # ---------- 4. 提取明面引用集合 (Set A) ----------
     import re as _re
     cited_indices = set()
     for m in _re.finditer(r'资料\s*#(\d+)', answer):
         cited_indices.add(int(m.group(1)))
-    if cited_indices:
-        for idx in cited_indices:
-            if 1 <= idx <= len(retrieved_docs):
-                retrieved_docs[idx - 1]["adopted"] = True
-        logger.info("[RAG Agent] LLM 引用了资料: {} (共 {}/{})",
-                    sorted(cited_indices), len(cited_indices), len(retrieved_docs))
-    else:
-        # LLM 没有显式引用编号，按置信度阈值兜底标记
-        for d in retrieved_docs:
-            d["adopted"] = d["score"] <= RELEVANCE_THRESHOLD
-        logger.info("[RAG Agent] LLM 未显式引用资料编号，按阈值 {} 兜底标记", RELEVANCE_THRESHOLD)
 
     logger.info("[RAG Agent] 检索 {} 段，回答 {} 字符", len(retrieved_docs), len(answer))
 
-    # ---------- 5. 忠实性校验：拆解回答中的事实声明，逐一核查是否有资料支撑 ----------
+    # ---------- 5. 提取实质支撑集合 (Set B) 及处理评委幻觉 ----------
     faithfulness_result = {}
-    if effective_docs and answer and len(answer) > 20:
+    faith_indices = set()
+    if retrieved_docs and answer and len(answer) > 20:
         faithfulness_result, faith_tokens = _check_faithfulness(
-            llm, answer, effective_docs, token_queue,
+            llm, answer, retrieved_docs, token_queue,
         )
         node_tokens += faith_tokens
+        
+        # 评委幻觉处理：若 source_index 越界，强行剥夺 supported 资格
+        if faithfulness_result and "claims" in faithfulness_result:
+            for claim in faithfulness_result["claims"]:
+                if isinstance(claim, dict):
+                    s_idx = claim.get("source_index", 0)
+                    is_supp = claim.get("supported", False)
+                else:
+                    s_idx = getattr(claim, "source_index", 0)
+                    is_supp = getattr(claim, "supported", False)
+                    
+                if is_supp:
+                    if 1 <= s_idx <= len(retrieved_docs):
+                        faith_indices.add(s_idx)
+                    else:
+                        if isinstance(claim, dict):
+                            claim["supported"] = False
+                        else:
+                            claim.supported = False
+                        logger.warning(f"[RAG Agent] 评委幻觉：越界依据资料 #{s_idx}，强制剥夺 supported 状态")
+                        
+            # 重新计算 score
+            total = faithfulness_result.get("total_claims", 0)
+            claims = faithfulness_result.get("claims", [])
+            if claims and not isinstance(claims[0], dict):
+                supported = sum(1 for c in claims if getattr(c, "supported", False))
+            else:
+                supported = sum(1 for c in claims if c.get("supported"))
+            faithfulness_result["supported_claims"] = supported
+            faithfulness_result["score"] = (supported / total) if total > 0 else 1.0
+
+    # ---------- 6. 统一双轨防幻觉验证 ----------
+    extra_risk_flags = []
+    final_adopted_indices = set()
+
+    # 验证 1：主 Agent 假引用越界检查 (Fake Citation)
+    valid_cited_indices = set()
+    for idx in cited_indices:
+        if 1 <= idx <= len(retrieved_docs):
+            valid_cited_indices.add(idx)
+        else:
+            extra_risk_flags.append("fake_citation")
+            logger.warning(f"[RAG Agent] 主模型幻觉：越界假引用资料 #{idx}")
+
+    # 验证 2：张冠李戴与格式崩塌容错
+    if not cited_indices and retrieved_docs and answer:
+        extra_risk_flags.append("missing_citation_format")
+        # 如果大模型忘了格式，但有忠实度校验兜底，就优先用忠实度的发现！
+        if faith_indices:
+            logger.info("[RAG Agent] LLM 未显式引用资料编号，优先采用忠实度校验的支撑集合")
+            final_adopted_indices = faith_indices
+        else:
+            logger.info("[RAG Agent] LLM 未显式引用，且无有效校验结果，退回阈值盲猜兜底标记")
+            for i, d in enumerate(retrieved_docs, 1):
+                if d.get("score", 1.0) <= RELEVANCE_THRESHOLD:
+                    final_adopted_indices.add(i)
+    else:
+        # 张冠李戴检查：明面上标了，但实际没支撑
+        # 前提：faithfulness_result 必须存在（校验实际跑了），否则不算 mismatched
+        if faithfulness_result and "claims" in faithfulness_result:
+            mismatched = valid_cited_indices - faith_indices
+            if mismatched:
+                extra_risk_flags.append("mismatched_citation")
+                logger.warning(f"[RAG Agent] 张冠李戴：伪引用了不相干的资料 {mismatched}")
+        
+        final_adopted_indices = valid_cited_indices.union(faith_indices)
+
+    # 给最终确定的合法资料打上 adopted 标记
+    for idx in final_adopted_indices:
+        if 1 <= idx <= len(retrieved_docs):
+            retrieved_docs[idx - 1]["adopted"] = True
 
     # 状态瘦身：截断持久化对象中的完整原文，防止 Checkpointer 状态膨胀
     for d in retrieved_docs:
         if "content" in d and len(str(d["content"])) > 500:
             d["content"] = str(d["content"])[:500] + "...(truncated)"
             
-    obs = build_rag_observation(retrieved_docs, faithfulness_result, answer)
+    obs = build_rag_observation(retrieved_docs, faithfulness_result, answer, extra_risk_flags=extra_risk_flags)
     
     risk_flags = []
     if faithfulness_result and faithfulness_result.get("score", 1.0) < 0.5:
         risk_flags.append("unfaithful")
+    risk_flags.extend(extra_risk_flags)
         
     step_output = StepOutput(
         step=current_step or 0, agent="rag_agent", instruction=supervisor_instruction,
@@ -680,7 +746,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             output_summary={
                 "hits": len(retrieved_docs),
                 "effective_hits": len(effective_docs),
-                "parent_merged": len(retrieved_docs) - len(effective_docs),
+                "parent_merged": original_retrieved_count - len(effective_docs),
                 "top_score": retrieved_docs[0]["score"],
                 "answer_preview": answer[:80],
                 "tokens": node_tokens,

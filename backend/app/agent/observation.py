@@ -19,6 +19,9 @@ RISK_EMPTY_BUSINESS_CONTEXT = "empty_business_context"
 RISK_PERMISSION_ERROR = "permission_error"
 RISK_MISSING_REQUIRED_CONTEXT = "missing_required_context"
 RISK_ANSWER_TOOL_MISMATCH = "answer_tool_mismatch"
+RISK_FAKE_CITATION = "fake_citation"
+RISK_MISMATCHED_CITATION = "mismatched_citation"
+RISK_MISSING_CITATION_FORMAT = "missing_citation_format"
 
 KNOWN_RISK_FLAGS = {
     RISK_AGENT_FAILED,
@@ -37,6 +40,9 @@ KNOWN_RISK_FLAGS = {
     RISK_PERMISSION_ERROR,
     RISK_MISSING_REQUIRED_CONTEXT,
     RISK_ANSWER_TOOL_MISMATCH,
+    RISK_FAKE_CITATION,
+    RISK_MISMATCHED_CITATION,
+    RISK_MISSING_CITATION_FORMAT,
 }
 
 def normalize_risk_flags(flags: List[str]) -> List[str]:
@@ -76,7 +82,8 @@ def build_rag_observation(
     retrieved_docs: List[Dict[str, Any]],
     faithfulness: Optional[Dict[str, Any]],
     answer: str,
-    is_error: bool = False
+    is_error: bool = False,
+    extra_risk_flags: List[str] = None
 ) -> Dict[str, Any]:
     total_claims = faithfulness.get("total_claims", 0) if faithfulness else 0
     supported_claims = faithfulness.get("supported_claims", 0) if faithfulness else 0
@@ -97,6 +104,9 @@ def build_rag_observation(
         risk_flags.append(RISK_LOW_FAITHFULNESS)
     if unsupported_claims > 0:
         risk_flags.append(RISK_UNSUPPORTED_CLAIMS)
+        
+    if extra_risk_flags:
+        risk_flags.extend(extra_risk_flags)
 
     if status != "failed" and risk_flags:
         status = "partial"
