@@ -287,7 +287,7 @@ def _expand_retrieval_queries(llm, user_input: str, search_query: str) -> tuple[
         return [search_query], 0
 
 
-def _multi_query_retrieve(vector_store, embedder, collection_name: str, queries: list[str]) -> list:
+def _multi_query_retrieve(vector_store, embedder, collection_name: str, queries: list[str], bm25_future=None) -> list:
     """并发多路召回：主 query 走 hybrid_search，副 query 走 dense search，合并并按得分排序"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
@@ -297,11 +297,19 @@ def _multi_query_retrieve(vector_store, embedder, collection_name: str, queries:
         query_vec = embedder.embed_query(q)
         if idx == 0:
             # 核心 query 走双路混合召回，保证专有名词精确匹配
+            bm25_precomputed = None
+            if bm25_future:
+                try:
+                    bm25_precomputed = bm25_future.result()
+                except Exception as e:
+                    logger.warning("[RAG Agent] BM25后台预计算失败，降级为同步构建: {}", e)
+                    
             return vector_store.hybrid_search(
                 collection_name=collection_name,
                 query=q,
                 query_embedding=query_vec,
                 top_k=PER_QUERY_TOP_K,
+                bm25_precomputed=bm25_precomputed,
             )
         else:
             # 扩展 query 仅走向量密集召回，避免 BM25 重复计算带来性能损耗
@@ -413,6 +421,12 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
     vector_store = get_vector_store()
     llm = get_llm_fast()
 
+    # 进阶优化：并发预取（Asynchronous Pre-fetching）
+    # 在拿到 collection_name 的瞬间，立即开启后台线程预构建 BM25 倒排索引和词频字典
+    from concurrent.futures import ThreadPoolExecutor
+    executor = ThreadPoolExecutor(max_workers=1)
+    bm25_future = executor.submit(vector_store.precompute_bm25, collection_name)
+
     # 查询改写：结合对话历史和调度指令把模糊查询改写为具体查询
     node_tokens = 0
     search_query, rewrite_tokens = _rewrite_query(llm, user_input, supervisor_instruction, history_text)
@@ -429,6 +443,7 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             embedder=embedder,
             collection_name=collection_name,
             queries=retrieval_queries,
+            bm25_future=bm25_future,
         )
     except Exception as e:
         logger.exception("[RAG Agent] 检索失败: {}", e)
@@ -446,6 +461,8 @@ def rag_agent_node(state: AgentState) -> Dict[str, Any]:
             "step_outputs": [step_output],
             "execution_trace": append_trace(state, "rag_agent", started_at, error=str(e)),
         }
+    finally:
+        executor.shutdown(wait=False)
 
     # ---------- 1.5 Reranker 重排：精排候选，取 top_n 给 LLM ----------
     if raw_hits:

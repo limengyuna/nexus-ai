@@ -14,6 +14,32 @@ from loguru import logger
 
 from app.core.config import settings
 
+# ---------- BM25 Helper ----------
+_STOPWORDS = frozenset(
+    "的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 "
+    "自己 这 他 她 它 们 那 被 从 把 让 用 但 而 可以 这个 这些 那个 那些 什么 怎么 "
+    "如何 为什么 吗 呢 吧 啊 哦 嗯 哈 之 其 或 与 及 等 个 各 为 于 对 中 以 下 里 "
+    "面 里面 上面 下面 前 后 左 右 大 小 多 少 来 去 过 做 想 能 会 应该 可能 "
+    "请 帮 我们 你们 他们 她们 它们 这里 那里 一下 一些 时候".split()
+)
+
+def _tokenize_bm25(text: str) -> List[str]:
+    import re
+    import jieba
+    tokens = []
+    for word in jieba.cut(text):
+        word = word.strip().lower()
+        if not word:
+            continue
+        if re.fullmatch(r'[\s\W]+', word):
+            continue
+        if word in _STOPWORDS:
+            continue
+        if len(word) == 1 and '\u4e00' <= word <= '\u9fa5':
+            continue
+        tokens.append(word)
+    return tokens
+
 
 # ---------- 检索结果数据结构 ----------
 @dataclass
@@ -70,9 +96,20 @@ class BaseVectorStore(ABC):
         query_embedding: List[float],
         top_k: int = 5,
         where: Optional[Dict[str, Any]] = None,
+        bm25_precomputed: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """双路检索（向量检索 + BM25 关键词检索），并通过 RRF 融合"""
         raise NotImplementedError
+
+    @abstractmethod
+    def precompute_bm25(
+        self,
+        collection_name: str,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """预计算 BM25 索引字典"""
+        raise NotImplementedError
+
 
     @abstractmethod
     def delete_by_metadata(
@@ -222,6 +259,7 @@ class ChromaVectorStore(BaseVectorStore):
         query_embedding: List[float],
         top_k: int = 5,
         where: Optional[Dict[str, Any]] = None,
+        bm25_precomputed: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         # 1. 密路（密集向量）检索：稍许放大候选集至 top_k * 2
         dense_hits = self.search(
@@ -232,68 +270,21 @@ class ChromaVectorStore(BaseVectorStore):
         )
 
         # 2. 疏路（BM25 关键词）检索
-        # 拉取该集合下满足过滤条件的全量文本分块（上限为 2000 个以保证性能）
-        all_hits = self.list_by_metadata(
-            collection_name=collection_name,
-            where=where or {},
-            limit=2000,
-        )
-
+        if bm25_precomputed is None:
+            bm25_precomputed = self.precompute_bm25(collection_name, where)
+            
+        all_hits = bm25_precomputed.get("all_hits", [])
         if not all_hits:
             return dense_hits[:top_k]
-
-        import re
-        import math
-        import jieba
-
-        # 中文停用词表（高频无意义字词，避免 BM25 噪音匹配）
-        _STOPWORDS = frozenset(
-            "的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 "
-            "自己 这 他 她 它 们 那 被 从 把 让 用 但 而 可以 这个 这些 那个 那些 什么 怎么 "
-            "如何 为什么 吗 呢 吧 啊 哦 嗯 哈 之 其 或 与 及 等 个 各 为 于 对 中 以 下 里 "
-            "面 里面 上面 下面 前 后 左 右 大 小 多 少 来 去 过 做 想 能 会 应该 可能 "
-            "请 帮 我们 你们 他们 她们 它们 这里 那里 一下 一些 时候".split()
-        )
-
-        # jieba 中英文混合分词器 + 停用词过滤
-        def tokenize(text: str) -> List[str]:
-            tokens = []
-            for word in jieba.cut(text):
-                word = word.strip().lower()
-                if not word:
-                    continue
-                # 过滤纯标点和空白
-                if re.fullmatch(r'[\s\W]+', word):
-                    continue
-                # 过滤停用词
-                if word in _STOPWORDS:
-                    continue
-                # 过滤单个汉字（区分度太低，保留英文/数字单字符如 "A"、"5"）
-                if len(word) == 1 and '\u4e00' <= word <= '\u9fa5':
-                    continue
-                tokens.append(word)
-            return tokens
-
-        query_tokens = tokenize(query)
+            
+        query_tokens = _tokenize_bm25(query)
         if not query_tokens:
             return dense_hits[:top_k]
 
-        # 动态构建倒排索引并计算 BM25 分数
-        corpus = [tokenize(h.content) for h in all_hits]
-        corpus_size = len(corpus)
-        avg_doc_len = sum(len(doc) for doc in corpus) / (corpus_size or 1)
-        doc_lens = [len(doc) for doc in corpus]
-
-        # 计算文档频率（DF）
-        doc_freqs = {}
-        for doc in corpus:
-            for term in set(doc):
-                doc_freqs[term] = doc_freqs.get(term, 0) + 1
-
-        # 计算逆文档频率（IDF）
-        idfs = {}
-        for term, freq in doc_freqs.items():
-            idfs[term] = math.log((corpus_size - freq + 0.5) / (freq + 0.5) + 1.0)
+        corpus = bm25_precomputed["corpus"]
+        idfs = bm25_precomputed["idfs"]
+        doc_lens = bm25_precomputed["doc_lens"]
+        avg_doc_len = bm25_precomputed["avg_doc_len"]
 
         # 对每个 Chunk 计算 BM25 得分
         k1 = 1.5
@@ -374,6 +365,46 @@ class ChromaVectorStore(BaseVectorStore):
             len(merged_hits),
         )
         return merged_hits
+
+    def precompute_bm25(
+        self,
+        collection_name: str,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """预计算 BM25 的 IDF 和 文本分词数据，支持并发预取"""
+        all_hits = self.list_by_metadata(
+            collection_name=collection_name,
+            where=where or {},
+            limit=2000,
+        )
+
+        if not all_hits:
+            return {"all_hits": [], "corpus": [], "idfs": {}, "doc_lens": [], "avg_doc_len": 0.0}
+
+        import math
+
+        corpus = [_tokenize_bm25(h.content) for h in all_hits]
+        corpus_size = len(corpus)
+        avg_doc_len = sum(len(doc) for doc in corpus) / (corpus_size or 1)
+        doc_lens = [len(doc) for doc in corpus]
+
+        doc_freqs = {}
+        for doc in corpus:
+            for term in set(doc):
+                doc_freqs[term] = doc_freqs.get(term, 0) + 1
+
+        idfs = {}
+        for term, freq in doc_freqs.items():
+            idfs[term] = math.log((corpus_size - freq + 0.5) / (freq + 0.5) + 1.0)
+
+        return {
+            "all_hits": all_hits,
+            "corpus": corpus,
+            "idfs": idfs,
+            "doc_lens": doc_lens,
+            "avg_doc_len": avg_doc_len,
+        }
+
 
     def delete_by_metadata(
         self,
