@@ -2,27 +2,25 @@
 
 # 🧠 NexusAI
 
-**LangGraph 多 Agent · RAG · MCP 协议 · 企业级 AI 中台**
+**LangGraph 多 Agent · RAG · MCP 协议 · 全栈 AI 应用**
 
-把私有知识、多步推理、外部工具、MCP 协议串成一个 **可观测、可控、可扩展** 的 AI 平台
+把私有知识、多步推理、外部工具、MCP 协议串成一个 **可观测、可控、可扩展** 的全栈 AI 平台
 
-<!-- 状态徽章（Live Demo / CI / Coverage 上线后替换占位 URL）-->
-[![Live Demo](https://img.shields.io/badge/Live_Demo-即将上线-success?logo=vercel)](#-live-demo--功能截图)
-[![CI](https://img.shields.io/badge/CI-即将接入-blue?logo=githubactions)](#)
-[![Coverage](https://img.shields.io/badge/coverage-即将接入-yellow)](#)
+<!-- 状态徽章 -->
+[![Live Demo](https://img.shields.io/badge/Live_Demo-在线体验-success?logo=railway)](https://nexus-ai-frontend-production.up.railway.app)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42b883?logo=vuedotjs)](https://vuejs.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.2-orange)](https://github.com/langchain-ai/langgraph)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.3.34-orange)](https://github.com/langchain-ai/langgraph)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-0.5-purple)](https://www.trychroma.com/)
 
-🎬 **[在线体验 →](#-live-demo--功能截图)** &nbsp;·&nbsp; 🏗️ **[系统架构 →](#️-系统架构)** &nbsp;·&nbsp; 🚀 **[5 秒启动 →](#-一键启动推荐)**
+🎬 **[在线体验 →](https://nexus-ai-frontend-production.up.railway.app)** &nbsp;·&nbsp; 🏗️ **[系统架构 →](#%EF%B8%8F-系统架构)** &nbsp;·&nbsp; 🚀 **[快速启动 →](#-一键启动推荐)**
 
 ---
 
-🏆 **30+ REST API · 5 Skills · 4 Tools · 3 种分块策略 · MCP 双向集成 · ~9,500 行代码 · 全 Docker 部署**
+🏆 **双模型推理 · LangGraph 0.3 循环调度 · 长期记忆 · 混合精排 RAG · HITL 安全审批 · MCP 双向集成**
 
 </div>
 
@@ -34,48 +32,40 @@
 <tr>
   <td width="50%">
 
-### 🤖 多 Agent 智能协作
-基于 **LangGraph** 状态机的可控编排：
-- **Router** 节点智能识别意图（chitchat / rag / tool）
-- **RAG Agent** 处理私有知识问答
-- **Tool Agent** 通过 Function Calling 调外部能力
-- **Fallback** 兜底，闲聊 + 错误恢复
-- 每一步执行链路 **全程可观测**
+### 🤖 Supervisor 循环调度架构
+摒弃单层 Router，采用 **LangGraph 0.3** 的状态循环模式：
+- **核心组件**：`context_prep`（上下文注入）、`Supervisor`（主控调度）、多业务节点（`RAG` / `Tool` / `BusinessContext`）、`synthesis_agent`（全局总结）
+- **决策循环**：子节点执行完毕后状态自动流转回 Supervisor，由 Supervisor 决策是继续下发任务还是 FINISH
+- **快照续跑**：集成 `langgraph-checkpoint-postgres`，支持状态保存与中断恢复
 
   </td>
   <td width="50%">
 
-### 📚 完整 RAG 管道
-从文档到回答的全流程：
-- **3 种分块策略**：Recursive / Markdown / **Semantic**（基于 Embedding 跳变）
-- **阿里通义 Embedding** + **ChromaDB** 向量检索
-- **multi-query RAG**（拆解查询提升召回）
-- **引用标注** 避免幻觉
+### 🧠 L2 动态长期记忆
+赋予 Agent 跨会话的上下文感知能力：
+- **全局 + KB 专属双维度**：同时检索用户级全局记忆与特定知识库专属记忆
+- **动态重要性衰减**：30 天未访问的记忆按引用频次分档衰减 importance（高频引用衰减极慢，零引用衰减快）
+- **容量淘汰**：每用户每 KB 上限 50 条，超出按 importance + access_count 末位淘汰；60 天未访问且低价值的自动清除
 
   </td>
 </tr>
 <tr>
   <td>
 
-### 🎯 5 种 Skills 编排
-**Skill = Tool + Prompt + LLM 链式调用**
-
-| Skill | 形态 |
-|------|------|
-| `travel_planner` | 1 Tool + 1 LLM |
-| `data_analyst` | LLM-Tool-LLM 三明治 |
-| `email_drafter` | 纯 LLM 多步推理 |
-| `document_summarizer` | multi-query RAG |
-| `research_assistant` | web + RAG 多源综合 |
+### 📚 多路召回 + 精排 RAG 管线
+从文档到回答的完整检索-生成链路：
+- **3 种分块策略**：Recursive / Markdown / **Semantic**（基于 Embedding 跳变）
+- **1 主 + 2 副多路召回**：BM25 倒排索引 + 双路 Dense 向量扩展
+- **Cross-Encoder Reranker 精排**：通义 gte-rerank 模型计算候选块与核心意图的相关度
+- **Parent-Child 回溯**：命中子片段自动提取父原文，防止上下文碎裂
 
   </td>
   <td>
 
-### 🔌 MCP 双向集成
-**完整的** Model Context Protocol 实现：
-- **作为 Server** 把 RAG + Tools 暴露给 Claude Desktop 等外部 client
-- **作为 Client** 动态接入外部 MCP Server（GitHub、Filesystem...）
-- 前端可视化配置 + 一键测试连接
+### 🛡️ HITL 与工程决策亮点
+- **双模型快慢分离**：复杂推理任务走 `deepseek-v4-pro`，轻量判定/工具调用走 `deepseek-v4-flash`
+- **HITL 审批**：外部 MCP 工具或危险操作被 `danger.py` 判定后触发 `interrupt`，阻断图执行，等待前端用户点击授权确认
+- **Agent 运行时防伪造**：`AgentRuntimeContext` 在系统底层物理注入用户级 ID，杜绝大模型伪造参数越权
 
   </td>
 </tr>
@@ -96,79 +86,75 @@ graph TB
         AUTH[JWT 认证 + 多租户隔离 + 限流]
     end
 
-    subgraph "Agent 层 LangGraph"
-        ROUTER[Router 节点]
+    subgraph "Agent 层 LangGraph 0.3"
+        PREP[context_prep<br/>前置上下文注入]
+        SUPERVISOR{Supervisor<br/>循环调度中心}
         RAG_AGENT[RAG Agent]
         TOOL_AGENT[Tool Agent]
-        FALLBACK[Fallback]
+        BIZ_AGENT[business_context_agent]
+        SYNTH[synthesis_agent<br/>结果综合]
     end
 
-    subgraph "Skills 层 业务工作流"
-        S1[travel_planner]
-        S2[data_analyst]
-        S3[document_summarizer]
-        S4[research_assistant]
-        S5[email_drafter]
+    subgraph "知识引擎"
+        MEMORY[L2 长期记忆]
+        RETRIEVER[混合检索<br/>BM25 + Vector]
+        RERANKER[Reranker 精排]
     end
 
-    subgraph "Tools 层 原子能力"
-        T1[get_weather]
-        T2[calculate]
-        T3[rag_search]
-        T4[web_search]
+    subgraph "Skills & Tools"
+        SKILLS["5 Skills<br/>(travel, data, email, summary, research)"]
+        TOOLS["6 Tools<br/>(weather, calc, rag, web, biz_ctx, danger)"]
     end
 
     subgraph "数据层"
-        PG[(PostgreSQL<br/>用户/会话/KB)]
+        PG[(PostgreSQL<br/>用户/记忆/Checkpoint)]
         REDIS[(Redis<br/>Celery + 缓存)]
         CHROMA[(ChromaDB<br/>向量存储)]
     end
 
-    subgraph "异步"
-        CELERY[Celery Worker<br/>文档处理]
-    end
-
-    subgraph "外部"
-        DS[DeepSeek LLM]
-        TY[阿里通义 Embedding]
+    subgraph "外部基座"
+        PRO[DeepSeek V4 Pro<br/>复杂推理]
+        FLASH[DeepSeek V4 Flash<br/>快速响应]
+        EMB[阿里通义 Embedding]
         MCP_EXT[外部 MCP Servers]
     end
 
     UI -->|HTTPS / SSE| API
-    API --> AUTH --> ROUTER
-    ROUTER -->|chitchat| FALLBACK
-    ROUTER -->|rag| RAG_AGENT
-    ROUTER -->|tool| TOOL_AGENT
-    TOOL_AGENT --> S1 & S2 & S3 & S4 & S5
-    S1 & S2 --> T1 & T2
-    S3 --> T3
-    S4 --> T3 & T4
-    RAG_AGENT --> T3
-    T3 --> CHROMA
+    API --> AUTH --> PREP
+    PREP --> SUPERVISOR
+
+    SUPERVISOR -->|rag| RAG_AGENT
+    SUPERVISOR -->|tool| TOOL_AGENT
+    SUPERVISOR -->|business| BIZ_AGENT
+
+    RAG_AGENT --> SUPERVISOR
+    TOOL_AGENT --> SUPERVISOR
+    BIZ_AGENT --> SUPERVISOR
+    TOOL_AGENT -.->|interrupt 审批| UI
+
+    SUPERVISOR -->|synthesis| SYNTH
+    SYNTH --> END_NODE[END]
+    SUPERVISOR -->|FINISH| END_NODE
+
+    TOOL_AGENT --> SKILLS --> TOOLS
+
+    RAG_AGENT --> MEMORY
+    RAG_AGENT --> RETRIEVER
+    RETRIEVER --> RERANKER
+    RETRIEVER --> CHROMA
+
     API --> PG
-    API --> CELERY --> REDIS
-    CELERY --> TY
-    RAG_AGENT & FALLBACK & S1 & S2 & S3 & S4 & S5 --> DS
+    API --> CELERY[Celery Worker] --> REDIS
     API <-->|stdio/SSE| MCP_EXT
 ```
 
 ---
 
-## 🎬 Live Demo & 功能截图
+## 🎬 在线体验
 
-> **在线体验**：即将部署到 Railway · [点这里访问](#)（部署完成后替换链接）
+> **地址**：[nexus-ai-frontend-production.up.railway.app](https://nexus-ai-frontend-production.up.railway.app)
 >
-> **演示账号**：`demo` / `demo123` （已预填示例知识库，无需上传文档即可体验）
-
-| 智能对话（SSE 流式 + 思考过程） | Skills 测试执行 |
-|:---:|:---:|
-| ![chat](./assets/screenshots/chat.png) | ![skills](./assets/screenshots/skills.png) |
-
-| 知识库管理 + 分块策略 | 暗色模式 |
-|:---:|:---:|
-| ![kb](./assets/screenshots/knowledge.png) | ![dark](./assets/screenshots/dark.png) |
-
-> 截图请放在仓库根的 `assets/screenshots/` 目录下（该目录会推送到 GitHub）。
+> **演示账号**：`demo` / `demo123`（已预填示例知识库，无需上传文档即可体验）
 
 ---
 
@@ -191,72 +177,13 @@ cp .env.example .env
 docker compose up -d
 ```
 
-第一次拉镜像 + 构建约 3-5 分钟。完成后：
-
 | 服务 | 地址 |
 |------|------|
 | 🌐 前端 UI | **http://localhost** |
 | 📚 后端 API 文档（Swagger） | http://localhost:8002/docs |
 | 🗄️ ChromaDB | http://localhost:8001 |
 
-### 3. 登录
-
-默认管理员账号：
-
-```
-用户名: admin
-密码:   admin123
-```
-
-> 首次启动会自动跑 `alembic upgrade head` 初始化数据库表结构。
-
----
-
-## 🧩 本地开发模式
-
-如果要修改代码 + HMR 热更新，使用本地开发模式：
-
-### 基础设施（Docker）
-
-```powershell
-# 只跑数据服务
-docker compose up -d postgres redis chroma
-```
-
-### 后端
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# 配置 .env（同上）
-cp ..\.env.example .env
-
-alembic upgrade head
-python main.py
-```
-
-新开终端跑 Celery：
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
-```
-
-### 前端
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-访问 http://localhost:5173
-
-> **快捷启动脚本**：项目根有 `nexus.bat` / `start.bat` / `stop.bat`（Windows）一键控制所有进程。
+默认管理员账号：`admin` / `admin123`
 
 ---
 
@@ -266,17 +193,16 @@ npm run dev
 | 类别 | 技术 |
 |------|------|
 | **Web 框架** | FastAPI 0.115 + Pydantic 2 + Uvicorn |
-| **ORM / 迁移** | SQLAlchemy 2.0 + Alembic |
-| **数据库** | PostgreSQL 16 |
+| **Agent 引擎** | **LangGraph 0.3.34** + **langgraph-checkpoint-postgres**（断点续跑） |
+| **双模型基座** | deepseek-v4-pro（推理） + deepseek-v4-flash（快响应） |
+| **MCP** | Anthropic 官方 SDK ≥1.2.0 |
+| **向量库** | ChromaDB 0.5 + BM25 倒排混合检索（Hybrid Search） |
+| **重排模型** | 通义 gte-rerank（Cross-Encoder 精排） |
+| **文档解析** | unstructured[pdf,pptx,docx] + pypdf + langchain-text-splitters |
+| **Web 搜索** | Tavily（tavily-python） |
+| **ORM / 迁移** | SQLAlchemy 2.0 + Alembic + PostgreSQL 16 |
 | **异步任务** | Celery 5.4 + Redis |
-| **向量库** | ChromaDB 0.5（HTTP 模式）|
-| **Agent 引擎** | LangGraph 0.2 |
-| **LLM** | DeepSeek（兼容 OpenAI SDK）|
-| **Embedding** | 阿里通义 text-embedding-v3 |
-| **MCP** | Anthropic 官方 SDK 1.1 |
-| **文档解析** | pypdf + python-docx + langchain-text-splitters |
-| **安全** | python-jose（JWT）+ passlib + **slowapi**（限流）|
-| **Web 搜索** | duckduckgo-search（免 API key）|
+| **安全机制** | danger.py（HITL 审批）+ AgentRuntimeContext + slowapi 限流 |
 
 ### 前端
 | 类别 | 技术 |
@@ -284,8 +210,6 @@ npm run dev
 | **框架** | Vue 3.5 + TypeScript + Vite 5 |
 | **路由 / 状态** | Vue Router 4 + Pinia 2 |
 | **样式 / 组件** | TailwindCSS 3 + Lucide Icons |
-| **通知** | vue-sonner + 自定义 ConfirmDialog |
-| **Markdown** | markdown-it + highlight.js |
 | **流式渲染** | fetch + ReadableStream + SSE 解析 |
 
 ---
@@ -294,68 +218,33 @@ npm run dev
 
 | 路由 | 页面 | 功能 |
 |------|------|------|
-| `/chat` | 💬 智能对话 | SSE 流式 + 思考链路 + 会话重命名/搜索/滚动/重生成 |
+| `/chat` | 💬 智能对话 | SSE 流式 + 思考链路 + 会话管理 + 重生成 |
 | `/knowledge` | 📚 知识库 | KB CRUD + 文档上传/预览/重新处理 + 3 种分块策略 |
-| `/skills` | ✨ Skills | **5 个 Skill 详情 + 测试执行**（KB 自动选）|
-| `/mcp` | 🔌 MCP 配置 | 外部 MCP Server 增删改 + **测试连接** + 工具清单 |
+| `/memory` | 🧠 记忆管理 | L2 长期记忆 CRUD + 可视化生命周期 |
+| `/skills` | ✨ Skills | 5 个 Skill 详情 + 测试执行 |
+| `/mcp` | 🔌 MCP 配置 | 外部 MCP Server 增删改 + 测试连接 + 工具清单 |
 
 ---
 
-## 🔐 企业化加固
+## 📊 质量保证与防幻觉
 
-| 维度 | 实现 |
-|------|------|
-| **认证** | JWT + bcrypt 密码哈希 + 路由级 `get_current_user` 依赖 |
-| **多租户** | 所有 KB / Document / MCP / Session 接口按 `created_by` / `user_id` 隔离 |
-| **限流** | slowapi 按 JWT-sub 限流：LLM 30/min · 登录 10/min · 上传 20/min |
-| **Prompt 防护** | 关键词检测 + 命中时给 system prompt 追加防护指令（非硬阻断）|
-| **数据持久化** | 3 个 Docker named volume（postgres / redis / chroma）|
-| **健康检查** | Compose 配 `healthcheck` + depends_on condition |
-| **错误处理** | 全局异常处理器 + 统一 ApiResponse 结构 |
-| **可观测性** | loguru 结构化日志 + 每次对话完整 `execution_trace`（前端可视化）|
+### 在线防幻觉机制
+- **实时忠实度校验**：将 LLM 回答拆解为事实声明（Claims），逐条与检出原文交叉校验支撑度
+- **假引用阻断**：引用 `[资料 #N]` 越界时强行剥夺 supported 状态；格式崩塌时回退到余弦阈值兜底标记
 
----
-
-## 📊 RAG 质量保证（评测体系）
-
-> 即将上线 · 30 条人工标注测试集 + Ragas 量化指标
-
-| 指标 | 含义 | 当前值 |
-|------|------|:---:|
-| **Faithfulness** | 答案是否忠实于检索资料（不编造）| 待补充 |
-| **Answer Relevancy** | 答案是否切题 | 待补充 |
-| **Context Precision** | 检索到的资料是否相关 | 待补充 |
-| **Context Recall** | 应该检索到的资料是否都召回了 | 待补充 |
-
-评测脚本：`scripts/eval_rag.py`（待加入）· 测试集：`tests/eval_dataset.jsonl`（待加入）
-
----
-
-## 🧠 Skills 编排示例（明星功能）
-
-`document_summarizer` 的工作流：
-
-```
-用户："总结一下这个知识库的核心架构"
-       ↓
-[LLM 拆解] → ["架构设计", "技术栈", "模块协作"]      (1 次 LLM)
-       ↓
-[RAG 检索 × 3] → 共 15 chunks，去重保留 10 段        (3 次 Tool)
-       ↓
-[LLM 综合] → 带 [1][3] 引用的结构化总结              (1 次 LLM)
-```
-
-**共 5 次链路调用**，前端 SkillsView 可一键测试，能看到完整 trace。
+### 离线评测
+项目内置基准测试脚本 `scripts/eval_benchmark.py`，覆盖：
+- 路由准确率（Supervisor 意图分发）
+- RAG 质量打分（DeepSeek 裁判模型 0-5 分评估）
+- 记忆偏好遵从度（多轮对话中长期记忆的召回效果）
 
 ---
 
 ## 🤝 致谢
 
-- [LangGraph](https://github.com/langchain-ai/langgraph) — Agent 状态机框架
-- [Anthropic MCP](https://modelcontextprotocol.io/) — 标准化的工具协议
-- [DeepSeek](https://platform.deepseek.com/) — 国产推理 LLM
-- [ChromaDB](https://www.trychroma.com/) — 嵌入式向量库
-- [shadcn-vue](https://www.shadcn-vue.com/) + [Lucide](https://lucide.dev/) — UI 灵感
+- [LangGraph](https://github.com/langchain-ai/langgraph) — 状态循环引擎
+- [Anthropic MCP](https://modelcontextprotocol.io/) — 工具接入标准
+- [DeepSeek](https://platform.deepseek.com/) — 国产双模型底座
 
 ---
 
