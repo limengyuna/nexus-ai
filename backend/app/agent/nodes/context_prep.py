@@ -63,34 +63,16 @@ def context_prep_node(state: AgentState) -> Dict[str, Any]:
             # 1. 注入结构化用户档案 (Profile Slots)
             profile_values = MemoryProfileStore.get_user_profile(db, user_id)
             slots_map = {s.id: s for s in db.execute(select(MemorySlot)).scalars().all()}
-            
-            # 基础默认注入的 slots
-            active_slot_keys = {
-                "profile.primary_language",
-                "agent.response_style",
-                "agent.detail_level",
-            }
-            
-            # 动态根据用户输入的关键词/意图激活其他 slots，避免过度干扰简单问题
-            input_lower = user_input.lower()
-            
-            # 格式/排版偏好激活
-            format_keywords = ["格式", "format", "列表", "表格", "json", "list", "table", "markdown", "排版", "输出", "段落"]
-            if any(kw in input_lower for kw in format_keywords):
-                active_slot_keys.add("output.default_format")
-                
-            # 硬性规则与敏感度约束激活
-            constraint_keywords = ["禁止", "严禁", "不允许", "不要", "必须", "绝对", "脱敏", "隐私", "数据", "敏感", "规则", "约束", "rule", "constraint", "must", "never", "privacy", "sensitive"]
-            if any(kw in input_lower for kw in constraint_keywords):
-                active_slot_keys.add("constraint.must_follow")
-                active_slot_keys.add("constraint.do_not_do")
-                active_slot_keys.add("constraint.data_sensitivity")
-            
+
+            # 全量注入所有启用且有值的 Profile Slots
+            # 理由：10 个槽位全注入仅约 200-300 token，开销微乎其微；
+            # LLM 比关键词规则更能判断哪些 slot 与当前问题相关；
+            # 且 constraint 类槽位（must_follow / do_not_do）必须始终生效，不能依赖关键词触发
             profile_texts = []
             for val in profile_values:
                 slot = slots_map.get(val.slot_id)
-                if slot and slot.slot_key in active_slot_keys:
-                    profile_texts.append(f"- {slot.description}: {val.slot_value}")
+                if slot and slot.is_active:
+                    profile_texts.append(f"- [{slot.slot_type}] {slot.description}: {val.slot_value}")
                     injected_profile_slots.append({
                         "slot_key": slot.slot_key,
                         "slot_type": slot.slot_type,
@@ -102,17 +84,18 @@ def context_prep_node(state: AgentState) -> Dict[str, Any]:
                 context_messages.append({
                     "role": "system",
                     "content": (
-                        "以下是当前用户的结构化偏好与长期约束，请在不违背系统规则的前提下参考：\n"
-                        "<user_profile_constraints>\n"
+                        "以下是当前用户的结构化偏好档案，请在回答时参考：\n"
+                        "<user_profile>\n"
                         f"{profile_text_block}\n"
-                        "</user_profile_constraints>\n"
-                        "请注意：以上偏好仅在与当前问题相关时参考；若与当前用户明确指令冲突，以当前指令为准。"
+                        "</user_profile>\n"
+                        "注意：以上偏好仅在与当前问题相关时参考；若与用户当前明确指令冲突，以当前指令为准。"
                     )
                 })
                 logger.info("[Context Prep] 成功注入 {} 条 Profile Slots", len(profile_texts))
 
             # 2. 注入 L2 语义事实库的相关历史事实与教训记忆，并严格过滤已被独立 Profile 接管的 "preference" 事实
-            retrieved = MemoryRetriever.retrieve(db, user_input, user_id, kb_id=kb_id, top_k=3)
+            from app.memory.retriever import MEMORY_MAX_INJECT
+            retrieved = MemoryRetriever.retrieve(db, user_input, user_id, kb_id=kb_id, top_k=MEMORY_MAX_INJECT)
             relevant_facts = [f for f in retrieved if f.fact_type.value != "preference"]
             
             if relevant_facts:

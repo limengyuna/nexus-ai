@@ -78,18 +78,18 @@ class MemoryStore:
                         "[Memory Store] 检测到语义重复的事实 (现有距离={:.4f})，执行合并更新。\n新: {}\n旧: {}",
                         hit.score, content, fact.content
                     )
-                    # 偏好更新：如果新提取的信息包含更丰富的细节或重要性更高，更新内容和重要性
-                    if len(content) > len(fact.content) or importance > fact.importance:
-                        fact.content = content
-                        fact.importance = max(fact.importance, importance)
-                        # 同时更新向量库中的文本
-                        vector_store.add_chunks(
-                            collection_name=collection_name,
-                            chunk_ids=[hit.chunk_id],
-                            documents=[content],
-                            embeddings=[query_embedding],
-                            metadatas=[hit.metadata]
-                        )
+                    # 语义命中即视为同一事实的更新，无条件采用最新表述
+                    # 理由：避免 "Python 3.9 → 3.12" 等长度相近但信息过期时不触发更新
+                    fact.content = content
+                    fact.importance = max(fact.importance, importance)
+                    # 同步更新向量库中的文本
+                    vector_store.add_chunks(
+                        collection_name=collection_name,
+                        chunk_ids=[hit.chunk_id],
+                        documents=[content],
+                        embeddings=[query_embedding],
+                        metadatas=[hit.metadata]
+                    )
                     
                     # 增加访问权重和最后访问时间
                     fact.access_count += 1

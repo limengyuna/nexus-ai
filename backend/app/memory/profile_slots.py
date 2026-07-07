@@ -6,6 +6,8 @@ DEPRECATED_MEMORY_SLOT_KEYS = {
     "agent.autonomy_level",
     "knowledge.answer_grounding_requirement",
     "tool.approval_sensitivity",
+    "agent.detail_level",                    # 与 response_style 语义重叠，已合并
+    "knowledge.preferred_citation_style",     # RAG system prompt 已覆盖引用格式
 }
 
 DEFAULT_MEMORY_SLOTS = [
@@ -30,13 +32,7 @@ DEFAULT_MEMORY_SLOTS = [
         "allowed_values": ["concise", "detailed", "step_by_step", "formal"],
         "description": "用户偏好的回答风格",
     },
-    {
-        "slot_key": "agent.detail_level",
-        "slot_type": "agent",
-        "value_type": "enum",
-        "allowed_values": ["low", "medium", "high"],
-        "description": "回答的详细程度",
-    },
+
     {
         "slot_key": "agent.clarification_preference",
         "slot_type": "agent",
@@ -44,13 +40,7 @@ DEFAULT_MEMORY_SLOTS = [
         "allowed_values": ["ask_first", "assume_and_explain"],
         "description": "信息不足时偏好先问还是先给假设方案",
     },
-    # knowledge
-    {
-        "slot_key": "knowledge.preferred_citation_style",
-        "slot_type": "knowledge",
-        "value_type": "string",
-        "description": "回答是否需要引用来源，及引用风格",
-    },
+
     # output
     {
         "slot_key": "output.default_format",

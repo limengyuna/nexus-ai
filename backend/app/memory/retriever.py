@@ -10,7 +10,7 @@ L2 记忆语义检索器
 
 自动衰减淘汰策略：
 - 每个用户每个 kb 维度最多保留 50 条记忆，超出时淘汰综合得分最低的
-- 超过 30 天未访问 且 access_count < 2 → 自动降低 importance
+- 超过 30 天未访问 → 按 access_count 动态衰减 importance（引用越多衰减越慢）
 - 超过 60 天未访问 且 importance < 0.3 → 自动删除
 """
 from datetime import datetime, timezone, timedelta
@@ -31,6 +31,10 @@ _DECAY_INACTIVE_DAYS = 30         # 未访问多少天后开始衰减 importance
 _PURGE_INACTIVE_DAYS = 60         # 未访问多少天且 importance < 0.3 时自动删除
 _CST = timezone(timedelta(hours=8))
 
+# 动态阈值检索参数（公开常量，供 context_prep 等调用方引用）
+MEMORY_RELEVANCE_THRESHOLD = 0.55  # final_score 下限，低于此值的记忆不注入
+MEMORY_MAX_INJECT = 5              # 单次检索注入上限
+
 
 class MemoryRetriever:
     """L2 记忆事实检索器"""
@@ -41,16 +45,19 @@ class MemoryRetriever:
         user_input: str,
         user_id: int,
         kb_id: Optional[int] = None,
-        top_k: int = 3
+        top_k: int = MEMORY_MAX_INJECT
     ) -> List[MemoryFact]:
         """
-        检索与当前用户输入高度相关的记忆事实（按 kb_id 范围过滤）
+        检索与当前用户输入高度相关的记忆事实（动态阈值截断）
+
+        采用 final_score > MEMORY_RELEVANCE_THRESHOLD 做动态截断，
+        只返回真正相关的记忆，不注入无关垃圾。上限为 top_k 条。
 
         :param db: 数据库 Session
         :param user_input: 当前用户输入
         :param user_id: 用户 ID
         :param kb_id: 当前会话关联的知识库 ID（None 表示仅检索全局记忆）
-        :param top_k: 获取排名前 K 的记忆
+        :param top_k: 获取排名前 K 的记忆（默认 MEMORY_MAX_INJECT）
         :return: 关联的 MemoryFact 数据库对象列表
         """
         collection_name = MemoryStore.get_collection_name(user_id)
@@ -74,7 +81,7 @@ class MemoryRetriever:
         if not candidate_hits:
             return []
 
-        # 3. 关联度过滤 + kb_id 范围过滤 + 加权重排
+        # 3. 关联度过滤 + 加权重排 + 动态阈值截断
         scored_candidates: List[Tuple[MemoryFact, float]] = []
 
         for hit in candidate_hits:
@@ -92,6 +99,10 @@ class MemoryRetriever:
                 cosine_similarity = 1.0 - hit.score
                 # 综合得分 = 0.7 * 余弦相似度 + 0.3 * 重要性
                 final_score = 0.7 * cosine_similarity + 0.3 * fact.importance
+
+                # 动态阈值截断：只保留 final_score 超过阈值的记忆
+                if final_score < MEMORY_RELEVANCE_THRESHOLD:
+                    continue
 
                 scored_candidates.append((fact, final_score))
             except Exception as e:
